@@ -133,7 +133,7 @@ def LINE(em, name, value, inline=False):
 
 def progress_bar(pct, length=12):
     filled = max(0, min(length, round(pct / 100 * length)))
-    return "`[" + "█" * filled + "░" * (length - filled) + f"] %{int(pct})`"
+    return "`[" + "█" * filled + "░" * (length - filled) + f"] %{int(pct}`"
 
 def parse_sure(text):
     """'90' → dakika, '2h' → saat, '1d'/'1g' → gün"""
