@@ -67,7 +67,7 @@ if not OWNER_IDS:
     raise RuntimeError("OWNER_ID Railway Variable eksik.")
 
 APP_NAME = "Katre"
-VERSION = "4.2.0"
+VERSION = "5.0.0"
 PREFIX = "k!"
 START = time.time()
 
@@ -547,6 +547,12 @@ class _PrefixResponse:
         self.ctx = ctx
 
     async def send_message(self, content=None, **kwargs):
+        # Prefix komutları da slash komutlarıyla aynı modern arayüzü kullanır.
+        if content is not None and not kwargs.get("embed") and not kwargs.get("embeds"):
+            kwargs["embed"] = embed("Katre", str(content), discord.Color.blurple())
+            content = None
+        if kwargs.get("view") is None:
+            kwargs["view"] = KatreActionView(getattr(self.ctx.author, "id", None))
         return await self.ctx.send(content=content, **kwargs)
 
     async def defer(self, **kwargs):
@@ -558,6 +564,11 @@ class _PrefixFollowup:
         self.ctx = ctx
 
     async def send(self, content=None, **kwargs):
+        if content is not None and not kwargs.get("embed") and not kwargs.get("embeds"):
+            kwargs["embed"] = embed("Katre", str(content), discord.Color.blurple())
+            content = None
+        if kwargs.get("view") is None:
+            kwargs["view"] = KatreActionView(getattr(self.ctx.author, "id", None))
         return await self.ctx.send(content=content, **kwargs)
 
 
@@ -844,19 +855,302 @@ async def on_command_error(ctx, error):
 
 # ----------------------------- BASIC SLASH -----------------------------
 
-@bot.tree.command(name="yardim", description="Katre'nin tüm özelliklerini gösterir.")
+# ----------------------------- ADVANCED HELP CENTER -----------------------------
+
+HELP_CATEGORIES = {
+    "temel": ("🏠 Temel & Katre", ["yardim", "ping", "davet", "bot", "sunucu", "kullanici", "avatar", "istatistik", "support", "shard"]),
+    "profil": ("👤 Profil & Sosyal", ["afk", "rep", "profile", "rank", "leaderboard", "dogumgunu", "tag", "bugun"]),
+    "ekonomi": ("💰 Ekonomi", ["bakiye", "gunluk", "calis", "transfer", "kredi", "magaza", "envanter"]),
+    "seviye": ("⭐ Seviye & Görev", ["seviye", "gorev", "levelrol", "istatistik-kur", "gorevli", "gorevliler"]),
+    "moderasyon": ("🛡️ Moderasyon", ["ban", "unban", "kick", "timeout", "untimeout", "sil", "kilit", "uyar", "uyarilar", "yavasmod", "yasaklilar", "yasaklari-temizle"]),
+    "sunucu": ("⚙️ Sunucu Ayarları", ["prefix", "ayarlar", "log", "modlog", "hosgeldin", "otorol", "istatistik-kur", "logkur", "logkaldir", "reset"]),
+    "roller": ("🎭 Rol & Kanal", ["rol-ver", "rol-al", "süreli-rol", "rol", "roller", "kanallar", "herkese-rolver", "herkesten-rolal", "isimdeğiştir", "isimleri-sifirla", "butonrol", "menurol"]),
+    "koruma": ("🔒 Koruma & AutoMod", ["otomod", "otomod-link", "otomod-davet", "yasakli-kelime", "yasakli-kelimeler", "yasakli-kanal", "yasakli-komut", "capslock", "koruma"]),
+    "topluluk": ("🎉 Topluluk", ["ticket-panel", "ticket-ayarla", "cekilis", "anket", "oneri", "oneri-kanal", "hatirlat", "davetlink", "davetler", "ozeloda", "oda-kapat"]),
+    "eglence": ("🎮 Eğlence & Oyun", ["tkm", "yazitura", "zar", "slot", "terscevir", "pet", "ciftlik", "mayintarlasi", "adamasmaca", "kelimebulmaca", "xox", "sudoku"]),
+    "araclar": ("🧰 Araçlar", ["hesap", "surecevir", "rastgele", "renk", "id", "metin", "qr", "say", "embed", "konustur", "tweet", "pankart", "clyde", "music"]),
+    "notlar": ("📝 Not & Özel Komut", ["not-ekle", "notlar", "not-sil", "komut-ekle", "komut-sil", "tag-ekle", "goal"]),
+    "pro": ("💎 Pro", ["pro", "pro-ver", "pro-al", "pro-liste", "reklam-sunucu", "reklam", "reklam-komut", "reklam-mesaj"]),
+    "owner": ("👑 Owner", ["owner", "blacklist", "maintenance", "sunucu-listesi", "duyuru", "emoji", "sahip"]),
+}
+
+PREFIX_HELP_DESCRIPTIONS = {
+    "prefix": "Sunucunun özel komut önekini ayarlar.", "log": "Genel log kanalını ve log sistemini yönetir.",
+    "modlog": "Moderasyon olaylarının gönderileceği kanalı ayarlar.", "hosgeldin": "Yeni üyeler için karşılama mesajını yönetir.",
+    "otorol": "Yeni üyelere otomatik verilecek rolü ayarlar.", "reklam-sunucu": "Owner tarafından reklam sunucusunu tanımlar.",
+    "reklam": "Global reklam katılım şartını açar veya kapatır.", "reklam-komut": "Reklam şartını belirli komutlara uygular veya kaldırır.",
+    "reklam-mesaj": "Reklam katılımında gösterilecek özel mesajı ayarlar.", "pro-ver": "Bir kullanıcıya süreli veya kalıcı Pro verir.",
+    "pro-al": "Kullanıcının Pro üyeliğini kaldırır.", "emoji": "Katre'nin sistem emojilerini owner olarak yönetir.",
+    "oneri-kanal": "Önerilerin gönderileceği kanalı belirler.", "not-ekle": "Kendine veya sunucuya hızlı not kaydeder.",
+    "notlar": "Kayıtlı notlarını listeler.", "not-sil": "Seçtiğin notu siler.", "komut-ekle": "Sunucuya özel bir k! özel komutu oluşturur.",
+    "komut-sil": "Sunucuya özel özel komutu kaldırır.", "tag-ekle": "Sunucu tag sistemine yeni tag ekler.", "tag": "Sunucu tag bilgisini gösterir veya yönetir.",
+    "süreli-rol": "Bir üyeye belirli süreli rol verir.", "levelrol": "Seviyelere göre otomatik rol dağıtımını ayarlar.",
+    "roller": "Sunucudaki rolleri düzenli biçimde listeler.", "kanallar": "Sunucudaki kanalları kategorileriyle listeler.",
+    "herkese-rolver": "Belirlenen rolü uygun üyelere topluca verir.", "herkesten-rolal": "Belirlenen rolü üyelerden topluca alır.",
+    "isimdeğiştir": "Bir üyenin sunucu takma adını değiştirir.", "isimleri-sifirla": "Üyelerin takma adlarını sıfırlamak için yönetim aracı sunar.",
+    "yavasmod": "Kanal için yavaş mod süresini ayarlar.", "yasaklilar": "Sunucunun banlı kullanıcılarını listeler.",
+    "yasaklari-temizle": "Ban listesini toplu yönetmek için yönetici aracıdır.", "yasakli-kanal": "Belirli kanallarda komut kullanımını kısıtlar.",
+    "yasakli-komut": "Sunucuda belirli komutları yasaklar veya açar.", "yasakli-kelimeler": "Yasaklı kelime listesini görüntüler ve yönetir.",
+    "capslock": "Aşırı büyük harf filtresini yönetir.", "koruma": "Sunucunun güvenlik/koruma ayarlarını yönetir.",
+    "dogumgunu": "Doğum günü bilgisini kaydeder veya görüntüler.", "gorevli": "Sunucu görevli rol/ayar sistemini yönetir.",
+    "gorevliler": "Sunucudaki görevli yapılandırmasını gösterir.", "davetlink": "Sunucu için kullanılabilir davet bağlantısı oluşturur.",
+    "davetler": "Sunucunun davet bilgilerini ve istatistiklerini gösterir.", "ozeloda": "Kullanıcıya özel geçici ses/oda sistemi başlatır.",
+    "oda-kapat": "Açılmış özel odayı kapatır.", "tkm": "Taş-kâğıt-makas oyunu oynatır.", "yazitura": "Yazı-tura atar.", "zar": "Zar atar.",
+    "slot": "Basit slot/şans oyunu çalıştırır.", "terscevir": "Verilen metni tersine çevirir.", "hesap": "Basit matematik hesaplamaları yapar.",
+    "surecevir": "Süre birimlerini birbirine dönüştürür.", "rastgele": "Verilen seçeneklerden rastgele seçim yapar.", "renk": "Renk kodları ve renk yardımcı aracını gösterir.",
+    "id": "Kullanıcı, rol, kanal veya sunucu ID'sini bulmaya yardımcı olur.", "metin": "Metin üzerinde çeşitli biçimlendirme işlemleri yapar.",
+    "shard": "Bot shard durumunu gösterir.", "music": "Müzik sistemi hakkında bilgi/komut arayüzünü açar.",
+    "istatistik-kur": "Sunucu istatistik kanal sistemini kurar.", "logkur": "Log sistemini hızlı biçimde kurar.", "logkaldir": "Log sistemini kaldırır.",
+    "reset": "Sunucu Katre ayarlarını yönetici olarak sıfırlar.", "embed": "Özel embed mesajı oluşturur.", "say": "Botun belirlenen metni embedli biçimde söylemesini sağlar.",
+    "butonrol": "Buton üzerinden rol alma paneli oluşturur.", "menurol": "Select menü üzerinden rol alma paneli oluşturur.",
+    "konustur": "Botun belirlenen kanalda mesaj göndermesini sağlar.", "tweet": "Tweet benzeri görsel/metin içeriği oluşturur.",
+    "pankart": "Pankart tarzı metin görseli oluşturur.", "clyde": "Clyde tarzı eğlenceli mesaj üretir.", "pet": "Sanal pet sistemini yönetir.",
+    "ciftlik": "Basit çiftlik/eşya yönetim oyununu açar.", "mayintarlasi": "Mayın tarlası mini oyunu oynatır.", "adamasmaca": "Adam asmaca oyunu başlatır.",
+    "kelimebulmaca": "Kelime bulmaca oyunu başlatır.", "xox": "XOX oyunu başlatır.", "sudoku": "Sudoku mini oyununu açar.", "qr": "Metinden QR kod oluşturur.",
+    "bugun": "Günün bilgisini veya günlük içeriği gösterir.", "goal": "Kişisel hedef ekleme ve takip aracını kullanır.",
+    "owner": "Owner yönetim panelini açar; yalnızca bot owner'ları kullanabilir.", "blacklist": "Global blacklist sistemini owner olarak yönetir.",
+    "maintenance": "Botun global bakım modunu owner olarak açıp kapatır.", "sunucu-listesi": "Botun bulunduğu sunucuları owner panelinde listeler.",
+    "duyuru": "Botun bulunduğu sunuculara owner duyurusu gönderir.", "sahip": "Owner'a özel butonlu Katre kontrol merkezini açar.",
+}
+
+
+def help_command_info(name: str):
+    cmd = bot.tree.get_command(name)
+    if isinstance(cmd, app_commands.Command):
+        desc = cmd.description or "Katre komutu."
+        params = []
+        for p in cmd.parameters:
+            token = f"<{p.name}>" if p.required else f"[{p.name}]"
+            params.append(token)
+        usage = f"/{name}" + (" " + " ".join(params) if params else "")
+        return desc, usage, True
+    desc = PREFIX_HELP_DESCRIPTIONS.get(name, "Katre özelliğini çalıştırır ve sonucu embedli olarak gösterir.")
+    return desc, f"k!{name}", False
+
+
+
+def help_access_note(name: str):
+    if name in {"owner", "blacklist", "maintenance", "sunucu-listesi", "duyuru", "emoji", "sahip"}:
+        return "👑 Yalnızca Katre owner"
+    if name in {"pro-ver", "pro-al", "pro-liste"}:
+        return "👑 Owner"
+    perms = PREFIX_PERMISSION_REQUIREMENTS.get(name) if "PREFIX_PERMISSION_REQUIREMENTS" in globals() else None
+    if perms:
+        return "🛡️ " + ", ".join(p.replace("_", " ").title() for p in perms)
+    if name in {"reklam", "reklam-komut", "reklam-mesaj", "reklam-sunucu"}:
+        return "👑 Owner / sunucu yönetimi"
+    return "🆓 Tüm üyeler (komuta özel kurallar olabilir)"
+
+
+def help_category_commands(key):
+    return HELP_CATEGORIES[key][1]
+
+
+def help_embed_for(category=None, page=0):
+    if category is None:
+        e = embed("Katre • Yardım Merkezi", "Katre'nin tüm özelliklerine kategoriler üzerinden ulaşabilirsin.\n\n**Slash komutları** hızlı erişim için sınırlıdır; diğer tüm özellikler **`k!komut`** biçiminde çalışır.", discord.Color.blurple())
+        for key, (title, names) in HELP_CATEGORIES.items():
+            e.add_field(name=title, value=f"`{len(names)} komut` • Menüyü kullanarak ayrıntıları aç", inline=True)
+        e.add_field(name="📌 Kullanım", value="Kategori seç → komutu incele → gösterilen kullanımı kopyala.\n**<zorunlu>** • **[opsiyonel]**", inline=False)
+        e.add_field(name="🔎 İpucu", value="Bir özelliği bulamazsan kategori menüsünden ilerle; bütün komutlar bu yardım merkezinde listelenir.", inline=False)
+        e.set_footer(text=f"Katre {VERSION} • {sum(len(v[1]) for v in HELP_CATEGORIES.values())} komut yardım kataloğunda")
+        return e
+
+    title, names = HELP_CATEGORIES[category]
+    per_page = 6
+    total_pages = max(1, (len(names) + per_page - 1) // per_page)
+    page = max(0, min(page, total_pages - 1))
+    chunk = names[page * per_page:(page + 1) * per_page]
+    e = embed(f"Katre • {title}", f"Bu kategoride **{len(names)} komut** bulunuyor. Sayfa **{page + 1}/{total_pages}**.", discord.Color.blurple())
+    for name in chunk:
+        desc, usage, slash = help_command_info(name)
+        access = "`/` + `k!`" if slash else "`k!`"
+        access_note = help_access_note(name)
+        example = usage
+        e.add_field(
+            name=f"{access} {name}",
+            value=f"{desc}\n**Kullanım:** `{usage}`\n**Erişim:** {access_note}\n**Örnek:** `{example}`",
+            inline=False
+        )
+    e.set_footer(text=f"Katre {VERSION} • Önce kategori seç, sonra komutu kopyala")
+    return e
+
+
+class HelpCategorySelect(discord.ui.Select):
+    def __init__(self, view_ref):
+        options = [discord.SelectOption(label=title.replace("🏠 ", "").replace("👤 ", "").replace("💰 ", "").replace("⭐ ", "").replace("🛡️ ", "").replace("⚙️ ", "").replace("🎭 ", "").replace("🔒 ", "").replace("🎉 ", "").replace("🎮 ", "").replace("🧰 ", "").replace("📝 ", "").replace("💎 ", "").replace("👑 ", ""), value=key, description=f"{len(names)} komut", emoji=title.split()[0]) for key, (title, names) in HELP_CATEGORIES.items()]
+        super().__init__(placeholder="📚 Bir kategori seç...", min_values=1, max_values=1, options=options)
+        self.view_ref = view_ref
+
+    async def callback(self, interaction: discord.Interaction):
+        if interaction.user.id != self.view_ref.author_id:
+            return await interaction.response.send_message("Bu yardım menüsünü yalnızca komutu açan kişi kullanabilir.", ephemeral=True)
+        self.view_ref.category = self.values[0]
+        self.view_ref.page = 0
+        self.view_ref.refresh()
+        await interaction.response.edit_message(embed=help_embed_for(self.view_ref.category, 0), view=self.view_ref)
+
+
+class HelpHomeButton(discord.ui.Button):
+    def __init__(self):
+        super().__init__(label="Ana Sayfa", style=discord.ButtonStyle.primary, emoji="🏠")
+    async def callback(self, interaction: discord.Interaction):
+        v = self.view
+        if interaction.user.id != v.author_id:
+            return await interaction.response.send_message("Bu yardım menüsünü yalnızca komutu açan kişi kullanabilir.", ephemeral=True)
+        v.category = None
+        v.page = 0
+        v.refresh()
+        await interaction.response.edit_message(embed=help_embed_for(), view=v)
+
+
+class HelpPrevButton(discord.ui.Button):
+    def __init__(self):
+        super().__init__(label="Önceki", style=discord.ButtonStyle.secondary, emoji="◀️")
+    async def callback(self, interaction: discord.Interaction):
+        v = self.view
+        if interaction.user.id != v.author_id:
+            return await interaction.response.send_message("Bu yardım menüsünü yalnızca komutu açan kişi kullanabilir.", ephemeral=True)
+        if not v.category:
+            return await interaction.response.defer()
+        v.page = max(0, v.page - 1)
+        v.refresh()
+        await interaction.response.edit_message(embed=help_embed_for(v.category, v.page), view=v)
+
+
+class HelpNextButton(discord.ui.Button):
+    def __init__(self):
+        super().__init__(label="Sonraki", style=discord.ButtonStyle.secondary, emoji="▶️")
+    async def callback(self, interaction: discord.Interaction):
+        v = self.view
+        if interaction.user.id != v.author_id:
+            return await interaction.response.send_message("Bu yardım menüsünü yalnızca komutu açan kişi kullanabilir.", ephemeral=True)
+        if not v.category:
+            return await interaction.response.defer()
+        total = max(1, (len(HELP_CATEGORIES[v.category][1]) + 5) // 6)
+        v.page = min(total - 1, v.page + 1)
+        v.refresh()
+        await interaction.response.edit_message(embed=help_embed_for(v.category, v.page), view=v)
+
+
+class HelpCloseButton(discord.ui.Button):
+    def __init__(self):
+        super().__init__(label="Kapat", style=discord.ButtonStyle.danger, emoji="✖️")
+    async def callback(self, interaction: discord.Interaction):
+        v = self.view
+        if interaction.user.id != v.author_id:
+            return await interaction.response.send_message("Bu yardım menüsünü yalnızca komutu açan kişi kullanabilir.", ephemeral=True)
+        await interaction.response.edit_message(content="Katre yardım merkezi kapatıldı.", embed=None, view=None)
+
+
+class HelpView(discord.ui.View):
+    def __init__(self, author_id):
+        super().__init__(timeout=300)
+        self.author_id = author_id
+        self.category = None
+        self.page = 0
+        self.refresh()
+
+    def refresh(self):
+        self.clear_items()
+        self.add_item(HelpCategorySelect(self))
+        self.add_item(HelpHomeButton())
+        prev = HelpPrevButton(); prev.disabled = self.category is None or self.page <= 0
+        nxt = HelpNextButton()
+        if self.category:
+            total = max(1, (len(HELP_CATEGORIES[self.category][1]) + 5) // 6)
+            nxt.disabled = self.page >= total - 1
+        else:
+            nxt.disabled = True
+        self.add_item(prev); self.add_item(nxt); self.add_item(HelpCloseButton())
+
+    async def on_timeout(self):
+        for item in self.children:
+            item.disabled = True
+
+
+# ----------------------------- KATRE V5 GLOBAL UI -----------------------------
+
+class KatreActionView(discord.ui.View):
+    """Komutların çoğunda ortak, hafif ve işlevsel alt menü."""
+    def __init__(self, author_id=None, timeout=180):
+        super().__init__(timeout=timeout)
+        self.author_id = author_id
+        self.add_item(KatreHelpButton())
+        self.add_item(KatreHomeButton())
+        self.add_item(KatreCloseButton())
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if self.author_id is None or interaction.user.id == self.author_id:
+            return True
+        await interaction.response.send_message(
+            embed=embed("Katre", "Bu paneli yalnızca komutu kullanan kişi kontrol edebilir.", discord.Color.orange()),
+            ephemeral=True
+        )
+        return False
+
+class KatreHelpButton(discord.ui.Button):
+    def __init__(self):
+        super().__init__(label="Yardım", style=discord.ButtonStyle.secondary, emoji=E("info"))
+    async def callback(self, interaction: discord.Interaction):
+        await send_help(interaction, interaction.user.id)
+
+class KatreHomeButton(discord.ui.Button):
+    def __init__(self):
+        super().__init__(label="Ana Menü", style=discord.ButtonStyle.primary, emoji=E("home"))
+    async def callback(self, interaction: discord.Interaction):
+        await interaction.response.edit_message(
+            embed=help_embed_for(),
+            view=HelpView(interaction.user.id)
+        )
+
+class KatreCloseButton(discord.ui.Button):
+    def __init__(self):
+        super().__init__(label="Kapat", style=discord.ButtonStyle.danger, emoji=E("close"))
+    async def callback(self, interaction: discord.Interaction):
+        await interaction.response.edit_message(
+            content=None,
+            embed=embed("Katre", "Panel kapatıldı. Yeniden açmak için `/yardim` veya `k!yardim` kullanabilirsin.", discord.Color.dark_grey()),
+            view=None
+        )
+
+# Slash callback'lerinin tek tek değiştirilmesine gerek kalmadan, düz metin
+# cevaplarını da embed + ortak buton arayüzüne yükseltir. Özel View kullanan
+# komutların kendi butonları aynen korunur.
+_original_interaction_send_message = discord.InteractionResponse.send_message
+
+async def _katre_interaction_send_message(self, content=None, *args, **kwargs):
+    if content is not None and not kwargs.get("embed") and not kwargs.get("embeds"):
+        kwargs["embed"] = embed("Katre", str(content), discord.Color.blurple())
+        content = None
+    if kwargs.get("view") is None:
+        parent = getattr(self, "_parent", None)
+        kwargs["view"] = KatreActionView(getattr(getattr(parent, "user", None), "id", None))
+    return await _original_interaction_send_message(self, content, *args, **kwargs)
+
+discord.InteractionResponse.send_message = _katre_interaction_send_message
+
+async def katre_followup(interaction, content=None, **kwargs):
+    """Defer + followup kullanan komutları da ortak Katre UI'sına taşır."""
+    if content is not None and not kwargs.get("embed") and not kwargs.get("embeds"):
+        kwargs["embed"] = embed("Katre", str(content), discord.Color.blurple())
+        content = None
+    if kwargs.get("view") is None:
+        kwargs["view"] = KatreActionView(getattr(interaction.user, "id", None))
+    return await interaction.followup.send(content=content, **kwargs)
+
+
+async def send_help(target, user_id):
+    view = HelpView(user_id)
+    if isinstance(target, discord.Interaction):
+        await target.response.send_message(embed=help_embed_for(), view=view)
+    else:
+        await target.send(embed=help_embed_for(), view=view)
+
+
+@bot.tree.command(name="yardim", description="Katre'nin kategorili, butonlu ve ayrıntılı yardım merkezini açar.")
 async def yardim(i: discord.Interaction):
-    e = embed("Katre Komuta Merkezi", "Modern, modüler ve public kullanım için tasarlanmış Katre.")
-    e.add_field(name="🛡 Moderasyon", value="`/ban` `/unban` `/kick` `/timeout` `/untimeout` `/uyar` `/sil` `/kilit`", inline=False)
-    e.add_field(name="⚙ Sunucu", value="`/ayarlar` `/otomod` `/otomod-link` `/otomod-davet`", inline=False)
-    e.add_field(name="🎫 Topluluk", value="`/ticket-panel` `/cekilis` `/anket` `/oneri` `/hatirlat` `/afk`", inline=False)
-    e.add_field(name="⭐ Seviye", value="`/rank` `/leaderboard` `/rep` `/seviye`", inline=False)
-    e.add_field(name="💰 Ekonomi", value="`/bakiye` `/gunluk` `/calis` `/transfer` `/magaza`", inline=False)
-    e.add_field(name="✨ Pro", value="`/pro` `/pro-liste` • Pro yönetiminin tamamı `k!` ile de kullanılabilir.", inline=False)
-    e.add_field(name="👑 Owner", value="`/owner` veya `k!sahip` ile yönetim panelini açabilirsin.", inline=False)
-    e.add_field(name="⌨️ Prefix", value="Slash menüsü sade tutuldu. Diğer özellikler `k!komut` biçiminde çalışır.", inline=False)
-    e.set_footer(text=f"Katre {VERSION} • /davet")
-    await i.response.send_message(embed=e)
+    await send_help(i, i.user.id)
 
 @bot.tree.command(name="ping", description="Bot gecikmesini gösterir.")
 async def ping(i):
@@ -1043,7 +1337,7 @@ async def untimeout(i, member: discord.Member):
 async def sil(i, amount: app_commands.Range[int, 1, 100]):
     await i.response.defer(ephemeral=True)
     deleted = await i.channel.purge(limit=amount)
-    await i.followup.send(embed=embed("Temizlendi", f"**{len(deleted)}** mesaj silindi.", discord.Color.green()), ephemeral=True)
+    await katre_followup(i, embed=embed("Temizlendi", f"**{len(deleted)}** mesaj silindi.", discord.Color.green()), ephemeral=True)
 
 @bot.tree.command(name="kilit", description="Kanalı kilitler/açar.")
 @app_commands.checks.has_permissions(manage_channels=True)
@@ -1303,7 +1597,7 @@ async def cekilis(i, sure: str, winners: app_commands.Range[int,1,20], *, prize:
     await msg.add_reaction("🎉")
     guild_data(i.guild.id)["giveaways"][str(msg.id)]={"message":msg.id,"channel":i.channel.id,"end":end,"winners":winners,"prize":prize,"ended":False}
     await persist()
-    await i.followup.send(ok("Çekiliş oluşturuldu."), ephemeral=True)
+    await katre_followup(i, ok("Çekiliş oluşturuldu."), ephemeral=True)
 
 @bot.tree.command(name="anket", description="Anket oluşturur.")
 async def anket(i, soru: str, secenek1: str, secenek2: str, secenek3: Optional[str] = None, secenek4: Optional[str] = None):
@@ -1431,7 +1725,7 @@ async def herkese_rolver(i, role: discord.Role):
         if not m.bot and role not in m.roles:
             try: await m.add_roles(role, reason=f"Katre /herkese-rolver • {i.user}"); count+=1
             except: pass
-    await i.followup.send(ok(f"**{count}** üyeye {role.mention} verildi."))
+    await katre_followup(i, ok(f"**{count}** üyeye {role.mention} verildi."))
 
 @app_commands.checks.has_permissions(manage_roles=True)
 async def herkesten_rolal(i, role: discord.Role):
@@ -1441,7 +1735,7 @@ async def herkesten_rolal(i, role: discord.Role):
         if role in m.roles:
             try: await m.remove_roles(role, reason=f"Katre /herkesten-rolal • {i.user}"); count+=1
             except: pass
-    await i.followup.send(ok(f"**{count}** üyeden {role.mention} alındı."))
+    await katre_followup(i, ok(f"**{count}** üyeden {role.mention} alındı."))
 
 @app_commands.checks.has_permissions(manage_nicknames=True)
 async def isimdegistir(i, member: discord.Member, isim: str):
@@ -1458,7 +1752,7 @@ async def isimleri_sifirla(i):
         if m.nick:
             try: await m.edit(nick=None, reason=f"Katre /isimleri-sifirla • {i.user}"); count+=1
             except: pass
-    await i.followup.send(ok(f"**{count}** takma ad sıfırlandı."))
+    await katre_followup(i, ok(f"**{count}** takma ad sıfırlandı."))
 
 @app_commands.checks.has_permissions(manage_channels=True)
 async def yavasmod(i, saniye: app_commands.Range[int,0,21600], channel: Optional[discord.TextChannel]=None):
@@ -1478,7 +1772,7 @@ async def yasaklari_temizle(i):
     async for entry in i.guild.bans(limit=None):
         try: await i.guild.unban(entry.user, reason=f"Katre /yasaklari-temizle • {i.user}"); count+=1
         except: pass
-    await i.followup.send(ok(f"**{count}** ban kaldırıldı."))
+    await katre_followup(i, ok(f"**{count}** ban kaldırıldı."))
 
 @app_commands.checks.has_permissions(manage_guild=True)
 async def yasakli_kanal(i, durum: str, channel: Optional[discord.TextChannel]=None):
@@ -2151,7 +2445,7 @@ async def prefix_ping(ctx):
 
 @bot.command(name="yardim")
 async def prefix_help(ctx):
-    await ctx.send("Katre: `/yardim` önemli slash komutlarını gösterir. Diğer özellikleri `k!komut` ile kullanabilirsin.")
+    await send_help(ctx, ctx.author.id)
 
 # ----------------------------- PREFIX CHECKS -----------------------------
 
