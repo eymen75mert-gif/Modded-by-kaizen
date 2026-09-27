@@ -132,8 +132,11 @@ def LINE(em, name, value, inline=False):
     em.add_field(name=name, value=value, inline=inline)
 
 def progress_bar(pct, length=12):
-    filled = max(0, min(length, round(pct / 100 * length)))
-    return "`[" + "█" * filled + "░" * (length - filled) + f"] %{int(pct}`"
+    pct = max(0, min(100, int(pct)))
+    filled = round(pct / 100 * length)
+    bar = "[" + "█" * filled + "░" * (length - filled) + "]"
+    return "`" + bar + " %" + str(pct) + "`"
+
 
 def parse_sure(text):
     """'90' → dakika, '2h' → saat, '1d'/'1g' → gün"""
