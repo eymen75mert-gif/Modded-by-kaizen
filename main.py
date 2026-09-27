@@ -1,3 +1,4 @@
+
 # KATRE — tek dosyalı, public Discord botu
 # Python 3.10+ / discord.py 2.7.x
 #
@@ -69,6 +70,7 @@ if not OWNER_IDS:
 APP_NAME = "Katre"
 VERSION = "5.0.0"
 PREFIX = "k!"
+KATRE_AVATAR_PATH = os.path.join(os.path.dirname(__file__), "assets", "katre_pp.png")
 START = time.time()
 
 DATA_PATH = Path("/data/katre.json") if Path("/data").exists() else Path("katre.json")
@@ -255,7 +257,19 @@ def fmt_seconds(s: int):
     return " ".join(parts)
 
 def embed(title, description="", color=discord.Color.blurple()):
-    return discord.Embed(title=f"✦ {title}", description=description, color=color, timestamp=datetime.now(timezone.utc))
+    e = discord.Embed(title=f"✦ {title}", description=description, color=color, timestamp=datetime.now(timezone.utc))
+    # Katre'nin güncel Discord avatarını tüm standart embedlerde marka olarak kullan.
+    try:
+        if globals().get("bot") and bot.user:
+            avatar_url = bot.user.display_avatar.url
+            e.set_author(name="Katre", icon_url=avatar_url)
+            e.set_thumbnail(url=avatar_url)
+            e.set_footer(text="Katre • Modern Discord deneyimi", icon_url=avatar_url)
+        else:
+            e.set_footer(text="Katre • Modern Discord deneyimi")
+    except Exception:
+        e.set_footer(text="Katre • Modern Discord deneyimi")
+    return e
 
 def ok(text): return f"{E('ok')} {text}"
 def no(text): return f"{E('no')} {text}"
@@ -361,8 +375,27 @@ def role_targetable(guild, role, actor):
 
 intents = discord.Intents.all()
 
+COMMAND_HELP_META = {}
+
 class Katre(commands.Bot):
     async def setup_hook(self):
+        # Discord global slash komut limiti nedeniyle yalnızca /yardim yayınlanır.
+        # Diğer tüm komutlar aynı callback üzerinden k! ile çalışmaya devam eder.
+        existing_commands = list(self.tree.get_commands())
+        for cmd in existing_commands:
+            if isinstance(cmd, app_commands.Command):
+                params = []
+                for p in cmd.parameters:
+                    token = f"<{p.name}>" if p.required else f"[{p.name}]"
+                    params.append(token)
+                COMMAND_HELP_META[cmd.name] = (cmd.description or "Katre komutu.", params)
+                if cmd.name != "yardim":
+                    PREFIX_ONLY_COMMANDS.setdefault(cmd.name, cmd.callback)
+
+        yardim_command = self.tree.get_command("yardim")
+        self.tree.clear_commands(guild=None)
+        if yardim_command is not None:
+            self.tree.add_command(yardim_command)
         await self.tree.sync()
         self.reminder_loop.start()
         self.temporary_role_loop.start()
@@ -372,8 +405,19 @@ class Katre(commands.Bot):
 
     async def on_ready(self):
         log.info("Katre hazır: %s | %s guild", self.user, len(self.guilds))
+        # İlk kurulumda pakete eklenen Katre PP'sini otomatik olarak bot avatarı yap.
+        # Avatar zaten özelleştirilmişse tekrar yükleyip rate-limit'e girmeyiz.
+        if not getattr(self, "_katre_avatar_checked", False):
+            self._katre_avatar_checked = True
+            try:
+                if self.user and self.user.avatar is None and os.path.isfile(KATRE_AVATAR_PATH):
+                    with open(KATRE_AVATAR_PATH, "rb") as fp:
+                        await self.user.edit(avatar=fp.read(), reason="Katre varsayılan profil görseli")
+                    log.info("Katre profil görseli otomatik uygulandı.")
+            except Exception as exc:
+                log.warning("Katre PP otomatik uygulanamadı: %s", exc)
         await self.change_presence(
-            activity=discord.Activity(type=discord.ActivityType.watching, name=f"/yardim • {len(self.guilds)} sunucu")
+            activity=discord.Activity(type=discord.ActivityType.watching, name=f"k!yardim • {len(self.guilds)} sunucu")
         )
 
     @tasks.loop(seconds=30)
@@ -871,7 +915,7 @@ HELP_CATEGORIES = {
     "araclar": ("🧰 Araçlar", ["hesap", "surecevir", "rastgele", "renk", "id", "metin", "qr", "say", "embed", "konustur", "tweet", "pankart", "clyde", "music"]),
     "notlar": ("📝 Not & Özel Komut", ["not-ekle", "notlar", "not-sil", "komut-ekle", "komut-sil", "tag-ekle", "goal"]),
     "pro": ("💎 Pro", ["pro", "pro-ver", "pro-al", "pro-liste", "reklam-sunucu", "reklam", "reklam-komut", "reklam-mesaj"]),
-    "owner": ("👑 Owner", ["owner", "blacklist", "maintenance", "sunucu-listesi", "duyuru", "emoji", "sahip"]),
+    "owner": ("👑 Owner", ["owner", "blacklist", "maintenance", "sunucu-listesi", "duyuru", "emoji", "sahip", "pp-ayarla"]),
 }
 
 PREFIX_HELP_DESCRIPTIONS = {
@@ -910,75 +954,107 @@ PREFIX_HELP_DESCRIPTIONS = {
     "bugun": "Günün bilgisini veya günlük içeriği gösterir.", "goal": "Kişisel hedef ekleme ve takip aracını kullanır.",
     "owner": "Owner yönetim panelini açar; yalnızca bot owner'ları kullanabilir.", "blacklist": "Global blacklist sistemini owner olarak yönetir.",
     "maintenance": "Botun global bakım modunu owner olarak açıp kapatır.", "sunucu-listesi": "Botun bulunduğu sunucuları owner panelinde listeler.",
-    "duyuru": "Botun bulunduğu sunuculara owner duyurusu gönderir.", "sahip": "Owner'a özel butonlu Katre kontrol merkezini açar.",
+    "duyuru": "Botun bulunduğu sunuculara owner duyurusu gönderir.", "sahip": "Owner'a özel butonlu Katre kontrol merkezini açar.", "pp-ayarla": "Paket içindeki Katre profil görselini bot avatarına uygular; yalnızca owner kullanabilir.",
 }
 
 
 def help_command_info(name: str):
-    cmd = bot.tree.get_command(name)
-    if isinstance(cmd, app_commands.Command):
-        desc = cmd.description or "Katre komutu."
-        params = []
-        for p in cmd.parameters:
-            token = f"<{p.name}>" if p.required else f"[{p.name}]"
-            params.append(token)
-        usage = f"/{name}" + (" " + " ".join(params) if params else "")
-        return desc, usage, True
-    desc = PREFIX_HELP_DESCRIPTIONS.get(name, "Katre özelliğini çalıştırır ve sonucu embedli olarak gösterir.")
+    meta = COMMAND_HELP_META.get(name)
+    if meta:
+        desc, params = meta
+        usage = f"k!{name}" + (" " + " ".join(params) if params else "")
+        return desc, usage, name == "yardim"
+    desc = PREFIX_HELP_DESCRIPTIONS.get(name, "Katre özelliğini çalıştırır; sonucu modern embed arayüzüyle gösterir.")
     return desc, f"k!{name}", False
 
 
 
+OWNER_ONLY_HELP = {
+    "owner", "blacklist", "maintenance", "sunucu-listesi", "duyuru", "emoji", "sahip", "pp-ayarla",
+    "pro-ver", "pro-al", "pro-liste",
+    "reklam-sunucu", "reklam", "reklam-komut", "reklam-mesaj"
+}
+
 def help_access_note(name: str):
-    if name in {"owner", "blacklist", "maintenance", "sunucu-listesi", "duyuru", "emoji", "sahip"}:
+    if name in OWNER_ONLY_HELP:
         return "👑 Yalnızca Katre owner"
-    if name in {"pro-ver", "pro-al", "pro-liste"}:
-        return "👑 Owner"
     perms = PREFIX_PERMISSION_REQUIREMENTS.get(name) if "PREFIX_PERMISSION_REQUIREMENTS" in globals() else None
     if perms:
         return "🛡️ " + ", ".join(p.replace("_", " ").title() for p in perms)
-    if name in {"reklam", "reklam-komut", "reklam-mesaj", "reklam-sunucu"}:
-        return "👑 Owner / sunucu yönetimi"
+    if name == "pro":
+        return "💎 Herkes görebilir; Pro durumu kişiye özeldir"
     return "🆓 Tüm üyeler (komuta özel kurallar olabilir)"
+
+def help_visible_categories(user_id=None):
+    owner = user_id in OWNER_IDS if user_id is not None else False
+    result = {}
+    known = set()
+    for key, (title, names) in HELP_CATEGORIES.items():
+        visible = [n for n in names if owner or n not in OWNER_ONLY_HELP]
+        known.update(names)
+        if visible:
+            result[key] = (title, visible)
+    # Yeni eklenen bir komut yardım listesinden asla kaybolmasın.
+    all_commands = set(COMMAND_HELP_META) | set(PREFIX_ONLY_COMMANDS) | {"sahip", "emoji", "pp-ayarla"}
+    missing = sorted(all_commands - known)
+    if missing:
+        visible_missing = [n for n in missing if owner or n not in OWNER_ONLY_HELP]
+        if visible_missing:
+            result["diger"] = ("🧩 Diğer Katre Komutları", visible_missing)
+    return result
 
 
 def help_category_commands(key):
     return HELP_CATEGORIES[key][1]
 
 
-def help_embed_for(category=None, page=0):
+def help_embed_for(category=None, page=0, user_id=None):
+    categories = help_visible_categories(user_id)
+    if category not in categories:
+        category = None
     if category is None:
-        e = embed("Katre • Yardım Merkezi", "Katre'nin tüm özelliklerine kategoriler üzerinden ulaşabilirsin.\n\n**Slash komutları** hızlı erişim için sınırlıdır; diğer tüm özellikler **`k!komut`** biçiminde çalışır.", discord.Color.blurple())
-        for key, (title, names) in HELP_CATEGORIES.items():
-            e.add_field(name=title, value=f"`{len(names)} komut` • Menüyü kullanarak ayrıntıları aç", inline=True)
-        e.add_field(name="📌 Kullanım", value="Kategori seç → komutu incele → gösterilen kullanımı kopyala.\n**<zorunlu>** • **[opsiyonel]**", inline=False)
-        e.add_field(name="🔎 İpucu", value="Bir özelliği bulamazsan kategori menüsünden ilerle; bütün komutlar bu yardım merkezinde listelenir.", inline=False)
-        e.set_footer(text=f"Katre {VERSION} • {sum(len(v[1]) for v in HELP_CATEGORIES.values())} komut yardım kataloğunda")
+        total = sum(len(v[1]) for v in categories.values())
+        e = embed(
+            "Katre • Yardım Merkezi",
+            "Katre'nin **tüm komutlarını** kategoriler üzerinden ayrıntılı biçimde inceleyebilirsin.\n\n"
+            "🔹 Botta yayınlanan **tek slash komutu:** **`/yardim`**\n"
+            "🔹 Diğer **tüm komutlar yalnızca `k!`** ile çalışır.\n"
+            "🔹 Her komutun açıklaması, kullanım şekli, örneği ve erişim bilgisi aşağıdadır.",
+            discord.Color.blurple()
+        )
+        for key, (title, names) in categories.items():
+            e.add_field(name=title, value=f"**{len(names)} komut**\nMenüden ayrıntıları aç.", inline=True)
+        e.add_field(
+            name="📌 Kullanım Sözlüğü",
+            value="`<zorunlu>` = mutlaka yazılmalı\n`[opsiyonel]` = yazılması isteğe bağlı\n`k!yardim` = bu menüyü prefix ile açar",
+            inline=False
+        )
+        e.set_footer(text=f"Katre {VERSION} • {total} kullanıcıya açık komut + owner'a özel komutlar")
         return e
 
-    title, names = HELP_CATEGORIES[category]
-    per_page = 6
+    title, names = categories[category]
+    per_page = 5
     total_pages = max(1, (len(names) + per_page - 1) // per_page)
     page = max(0, min(page, total_pages - 1))
     chunk = names[page * per_page:(page + 1) * per_page]
-    e = embed(f"Katre • {title}", f"Bu kategoride **{len(names)} komut** bulunuyor. Sayfa **{page + 1}/{total_pages}**.", discord.Color.blurple())
+    e = embed(f"Katre • {title}", f"Bu kategoride **{len(names)} komut** var • Sayfa **{page + 1}/{total_pages}**", discord.Color.blurple())
     for name in chunk:
         desc, usage, slash = help_command_info(name)
-        access = "`/` + `k!`" if slash else "`k!`"
+        access = "`/yardim` üzerinden açıklanır" if name == "yardim" else "`k!`"
         access_note = help_access_note(name)
-        example = usage
         e.add_field(
             name=f"{access} {name}",
-            value=f"{desc}\n**Kullanım:** `{usage}`\n**Erişim:** {access_note}\n**Örnek:** `{example}`",
+            value=f"**Açıklama:** {desc}\n**Kullanım:** `{usage}`\n**Erişim:** {access_note}\n**Komut biçimi:** `k!{name}`",
             inline=False
         )
-    e.set_footer(text=f"Katre {VERSION} • Önce kategori seç, sonra komutu kopyala")
+    e.set_footer(text=f"Katre {VERSION} • Tüm özellikler prefix: k!")
     return e
 
 
 class HelpCategorySelect(discord.ui.Select):
     def __init__(self, view_ref):
-        options = [discord.SelectOption(label=title.replace("🏠 ", "").replace("👤 ", "").replace("💰 ", "").replace("⭐ ", "").replace("🛡️ ", "").replace("⚙️ ", "").replace("🎭 ", "").replace("🔒 ", "").replace("🎉 ", "").replace("🎮 ", "").replace("🧰 ", "").replace("📝 ", "").replace("💎 ", "").replace("👑 ", ""), value=key, description=f"{len(names)} komut", emoji=title.split()[0]) for key, (title, names) in HELP_CATEGORIES.items()]
+        categories = help_visible_categories(view_ref.author_id)
+        options = [discord.SelectOption(label=title.replace("🏠 ", "").replace("👤 ", "").replace("💰 ", "").replace("⭐ ", "").replace("🛡️ ", "").replace("⚙️ ", "").replace("🎭 ", "").replace("🔒 ", "").replace("🎉 ", "").replace("🎮 ", "").replace("🧰 ", "").replace("📝 ", "").replace("💎 ", "").replace("👑 ", ""), value=key, description=f"{len(names)} komut", emoji=title.split()[0]) for key, (title, names) in categories.items()]
         super().__init__(placeholder="📚 Bir kategori seç...", min_values=1, max_values=1, options=options)
         self.view_ref = view_ref
 
@@ -988,7 +1064,7 @@ class HelpCategorySelect(discord.ui.Select):
         self.view_ref.category = self.values[0]
         self.view_ref.page = 0
         self.view_ref.refresh()
-        await interaction.response.edit_message(embed=help_embed_for(self.view_ref.category, 0), view=self.view_ref)
+        await interaction.response.edit_message(embed=help_embed_for(self.view_ref.category, 0, self.view_ref.author_id), view=self.view_ref)
 
 
 class HelpHomeButton(discord.ui.Button):
@@ -1001,7 +1077,7 @@ class HelpHomeButton(discord.ui.Button):
         v.category = None
         v.page = 0
         v.refresh()
-        await interaction.response.edit_message(embed=help_embed_for(), view=v)
+        await interaction.response.edit_message(embed=help_embed_for(user_id=v.author_id), view=v)
 
 
 class HelpPrevButton(discord.ui.Button):
@@ -1015,7 +1091,7 @@ class HelpPrevButton(discord.ui.Button):
             return await interaction.response.defer()
         v.page = max(0, v.page - 1)
         v.refresh()
-        await interaction.response.edit_message(embed=help_embed_for(v.category, v.page), view=v)
+        await interaction.response.edit_message(embed=help_embed_for(v.category, v.page, v.author_id), view=v)
 
 
 class HelpNextButton(discord.ui.Button):
@@ -1027,10 +1103,11 @@ class HelpNextButton(discord.ui.Button):
             return await interaction.response.send_message("Bu yardım menüsünü yalnızca komutu açan kişi kullanabilir.", ephemeral=True)
         if not v.category:
             return await interaction.response.defer()
-        total = max(1, (len(HELP_CATEGORIES[v.category][1]) + 5) // 6)
+        categories = help_visible_categories(v.author_id)
+        total = max(1, (len(categories[v.category][1]) + 4) // 5)
         v.page = min(total - 1, v.page + 1)
         v.refresh()
-        await interaction.response.edit_message(embed=help_embed_for(v.category, v.page), view=v)
+        await interaction.response.edit_message(embed=help_embed_for(v.category, v.page, v.author_id), view=v)
 
 
 class HelpCloseButton(discord.ui.Button):
@@ -1057,8 +1134,9 @@ class HelpView(discord.ui.View):
         self.add_item(HelpHomeButton())
         prev = HelpPrevButton(); prev.disabled = self.category is None or self.page <= 0
         nxt = HelpNextButton()
-        if self.category:
-            total = max(1, (len(HELP_CATEGORIES[self.category][1]) + 5) // 6)
+        categories = help_visible_categories(self.author_id)
+        if self.category and self.category in categories:
+            total = max(1, (len(categories[self.category][1]) + 4) // 5)
             nxt.disabled = self.page >= total - 1
         else:
             nxt.disabled = True
@@ -1100,7 +1178,7 @@ class KatreHomeButton(discord.ui.Button):
         super().__init__(label="Ana Menü", style=discord.ButtonStyle.primary, emoji=E("home"))
     async def callback(self, interaction: discord.Interaction):
         await interaction.response.edit_message(
-            embed=help_embed_for(),
+            embed=help_embed_for(user_id=interaction.user.id),
             view=HelpView(interaction.user.id)
         )
 
@@ -1143,9 +1221,9 @@ async def katre_followup(interaction, content=None, **kwargs):
 async def send_help(target, user_id):
     view = HelpView(user_id)
     if isinstance(target, discord.Interaction):
-        await target.response.send_message(embed=help_embed_for(), view=view)
+        await target.response.send_message(embed=help_embed_for(user_id=user_id), view=view)
     else:
-        await target.send(embed=help_embed_for(), view=view)
+        await target.send(embed=help_embed_for(user_id=user_id), view=view)
 
 
 @bot.tree.command(name="yardim", description="Katre'nin kategorili, butonlu ve ayrıntılı yardım merkezini açar.")
@@ -2165,7 +2243,8 @@ OWNER_CATEGORIES = {
         "`/reklam-mesaj` — katılım mesajı",
     ]),
     "bot": ("🤖 Bot", [
-        "`/duyuru` — tüm sunuculara duyuru",
+        "`k!pp-ayarla` — Katre profil görselini uygula",
+        "`k!duyuru` — tüm sunuculara duyuru",
         "`/sunucu-listesi` — sunucu listesi",
         "`/maintenance` — bakım modu",
         "`/blacklist` — global blacklist",
@@ -2296,6 +2375,21 @@ async def emoji_command(ctx, action: str = "liste", key: str = None, *, value: s
     await ctx.send(f"{E('info')} Kullanım: `k!emoji liste` • `k!emoji ayarla <anahtar> <emoji>` • `k!emoji sıfırla`")
 
 
+@bot.command(name="pp-ayarla")
+async def pp_ayarla(ctx):
+    """Owner: paketteki Katre PP'sini Discord bot avatarı olarak uygular."""
+    if not is_owner(ctx.author):
+        return
+    if not os.path.isfile(KATRE_AVATAR_PATH):
+        return await ctx.send(embed=embed("Katre PP", "Profil görseli pakette bulunamadı.", discord.Color.red()))
+    try:
+        with open(KATRE_AVATAR_PATH, "rb") as fp:
+            await bot.user.edit(avatar=fp.read(), reason=f"Owner tarafından Katre PP güncellendi: {ctx.author}")
+        await ctx.send(embed=embed("Katre PP Güncellendi", "Katre'nin profil görseli başarıyla uygulandı.", discord.Color.green()))
+    except discord.HTTPException as exc:
+        await ctx.send(embed=embed("Katre PP", f"Discord avatar güncellemesini kabul etmedi: `{exc}`", discord.Color.orange()))
+
+
 # ----------------------------- PREFIX COMMAND REGISTRY -----------------------------
 # Slash sayısı düşük tutulur; diğer komutlar k! ile kullanılmaya devam eder.
 PREFIX_ONLY_COMMANDS = {
@@ -2311,6 +2405,7 @@ PREFIX_ONLY_COMMANDS = {
     'pro-ver': globals()['pro_ver'],
     'pro-al': globals()['pro_al'],
     'emoji': globals()['emoji_slash'],
+    'pp-ayarla': globals()['pp_ayarla'],
     'oneri-kanal': globals()['oneri_kanal'],
     'not-ekle': globals()['not_ekle'],
     'notlar': globals()['notlar'],
