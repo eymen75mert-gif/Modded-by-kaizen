@@ -1,4 +1,3 @@
-
 # KATRE — tek dosyalı, public Discord botu
 # Python 3.10+ / discord.py 2.7.x
 #
@@ -68,7 +67,7 @@ if not OWNER_IDS:
     raise RuntimeError("OWNER_ID Railway Variable eksik.")
 
 APP_NAME = "Katre"
-VERSION = "3.0.0"
+VERSION = "4.2.0"
 PREFIX = "k!"
 START = time.time()
 
@@ -661,16 +660,19 @@ async def _prefix_convert(ctx, raw, annotation):
 
 
 async def _dispatch_prefix_slash(ctx, command_name, raw_args):
-    command = bot.tree.get_command(command_name)
-    if command is None or not isinstance(command, app_commands.Command):
-        return False
-
     # Native prefix commands keep priority where they already exist.
     native = bot.get_command(command_name)
     if native is not None:
         return False
 
-    callback = command.callback
+    command = bot.tree.get_command(command_name)
+    if command is not None and isinstance(command, app_commands.Command):
+        callback = command.callback
+    else:
+        # Slash'a çıkarılmayan komutlar k! ile çalışmaya devam eder.
+        callback = PREFIX_ONLY_COMMANDS.get(command_name)
+        if callback is None:
+            return False
     sig = inspect.signature(callback)
     params = list(sig.parameters.values())[1:]  # skip interaction
     tokens = list(raw_args)
@@ -712,11 +714,17 @@ async def _dispatch_prefix_slash(ctx, command_name, raw_args):
             await ctx.send(f"❌ Fazla parametre girdin. Kullanım: `k!{command_name}`")
             return True
 
-        # Slash permission decoratorsi prefix callback'inde otomatik çalışmadığı
-        # için kritik çekiliş komutunun prefix tarafını da burada koruyoruz.
-        if command_name == "cekilis":
-            if ctx.guild is None or (not is_owner(ctx.author) and not ctx.author.guild_permissions.manage_guild):
-                return True  # Yetkisiz k!cekilis kullanımı tamamen sessiz.
+        # Slash komutlarındaki yetki kontrolleri k! tarafında da uygulanır.
+        required_permissions = PREFIX_PERMISSION_REQUIREMENTS.get(command_name, ())
+        if required_permissions:
+            if ctx.guild is None:
+                return True
+            permissions = ctx.author.guild_permissions
+            if not all(getattr(permissions, permission, False) for permission in required_permissions):
+                if command_name == "cekilis":
+                    return True  # Yetkisiz k!cekilis tamamen sessiz.
+                await ctx.send("❌ Bu komut için gerekli Discord yetkisine sahip değilsin.")
+                return True
 
         interaction = _PrefixInteraction(ctx)
         await callback(interaction, *values)
@@ -839,13 +847,14 @@ async def on_command_error(ctx, error):
 @bot.tree.command(name="yardim", description="Katre'nin tüm özelliklerini gösterir.")
 async def yardim(i: discord.Interaction):
     e = embed("Katre Komuta Merkezi", "Modern, modüler ve public kullanım için tasarlanmış Katre.")
-    e.add_field(name="🛡 Moderasyon", value="`/ban` `/kick` `/timeout` `/uyar` `/sil` `/kilit` `/unban`", inline=False)
-    e.add_field(name="⚙ Sunucu", value="`/ayarlar` `/log` `/hosgeldin` `/otorol` `/otomod` `/prefix`", inline=False)
-    e.add_field(name="🎫 Topluluk", value="`/ticket` `/cekilis` `/anket` `/oneri` `/hatirlat` `/afk`", inline=False)
-    e.add_field(name="⭐ Seviye", value="`/rank` `/leaderboard` `/rep` `/levelrol`", inline=False)
+    e.add_field(name="🛡 Moderasyon", value="`/ban` `/unban` `/kick` `/timeout` `/untimeout` `/uyar` `/sil` `/kilit`", inline=False)
+    e.add_field(name="⚙ Sunucu", value="`/ayarlar` `/otomod` `/otomod-link` `/otomod-davet`", inline=False)
+    e.add_field(name="🎫 Topluluk", value="`/ticket-panel` `/cekilis` `/anket` `/oneri` `/hatirlat` `/afk`", inline=False)
+    e.add_field(name="⭐ Seviye", value="`/rank` `/leaderboard` `/rep` `/seviye`", inline=False)
     e.add_field(name="💰 Ekonomi", value="`/bakiye` `/gunluk` `/calis` `/transfer` `/magaza`", inline=False)
-    e.add_field(name="✨ Pro", value="`/pro` — Pro durumunu gösterir. Owner: `/pro-ver`, `/pro-al`", inline=False)
-    e.add_field(name="👑 Owner", value="`/owner` ile yönetici komutlarını görürsün.", inline=False)
+    e.add_field(name="✨ Pro", value="`/pro` `/pro-liste` • Pro yönetiminin tamamı `k!` ile de kullanılabilir.", inline=False)
+    e.add_field(name="👑 Owner", value="`/owner` veya `k!sahip` ile yönetim panelini açabilirsin.", inline=False)
+    e.add_field(name="⌨️ Prefix", value="Slash menüsü sade tutuldu. Diğer özellikler `k!komut` biçiminde çalışır.", inline=False)
     e.set_footer(text=f"Katre {VERSION} • /davet")
     await i.response.send_message(embed=e)
 
@@ -1063,7 +1072,6 @@ async def uyarilar(i, member: discord.Member):
 
 # ----------------------------- SERVER SETTINGS -----------------------------
 
-@bot.tree.command(name="prefix", description="Prefix'i değiştirir.")
 @app_commands.checks.has_permissions(manage_guild=True)
 async def prefix(i, value: str):
     if len(value) > 5: return await i.response.send_message("Prefix en fazla 5 karakter.", ephemeral=True)
@@ -1071,21 +1079,18 @@ async def prefix(i, value: str):
     await persist()
     await i.response.send_message(embed=embed("Prefix", f"Yeni prefix: `{value}`"))
 
-@bot.tree.command(name="log", description="Log kanalını ayarlar.")
 @app_commands.checks.has_permissions(manage_guild=True)
 async def log_cmd(i, channel: Optional[discord.TextChannel] = None):
     guild_data(i.guild.id)["log_channel"] = channel.id if channel else None
     await persist()
     await i.response.send_message(ok(f"Log kanalı {'#'+channel.name if channel else 'kapatıldı'}."))
 
-@bot.tree.command(name="modlog", description="Moderasyon log kanalını ayarlar.")
 @app_commands.checks.has_permissions(manage_guild=True)
 async def modlog(i, channel: Optional[discord.TextChannel] = None):
     guild_data(i.guild.id)["modlog_channel"] = channel.id if channel else None
     await persist()
     await i.response.send_message(ok("Moderasyon logu güncellendi."))
 
-@bot.tree.command(name="hosgeldin", description="Hoş geldin kanalını ayarlar.")
 @app_commands.checks.has_permissions(manage_guild=True)
 async def hosgeldin(i, channel: Optional[discord.TextChannel] = None, text: Optional[str] = None):
     cfg = guild_data(i.guild.id)
@@ -1094,7 +1099,6 @@ async def hosgeldin(i, channel: Optional[discord.TextChannel] = None, text: Opti
     await persist()
     await i.response.send_message(ok("Hoş geldin sistemi güncellendi."))
 
-@bot.tree.command(name="otorol", description="Otomatik üye rolünü ayarlar.")
 @app_commands.checks.has_permissions(manage_roles=True)
 async def otorol(i, role: Optional[discord.Role] = None):
     cfg = guild_data(i.guild.id)
@@ -1150,7 +1154,6 @@ async def yasakli_kelime(i, kelime: str):
 
 # ----------------------------- ADVERTISING / PRO -----------------------------
 
-@bot.tree.command(name="reklam-sunucu", description="Owner: reklam sunucusu ve davet linkini ayarlar.")
 async def reklam_sunucu(i, guild_id: str, invite: str):
     if not is_owner(i.user): return await i.response.send_message("Bu komut sadece Katre owner'ı içindir.", ephemeral=True)
     try: int(guild_id)
@@ -1161,7 +1164,6 @@ async def reklam_sunucu(i, guild_id: str, invite: str):
     await persist()
     await i.response.send_message(ok("Reklam sunucusu ayarlandı."), ephemeral=True)
 
-@bot.tree.command(name="reklam", description="Owner: genel reklam şartını aç/kapatır.")
 async def reklam(i, durum: str):
     if not is_owner(i.user): return await i.response.send_message("Owner komutu.", ephemeral=True)
     val = durum.lower() in ("aç","ac","on","true","1")
@@ -1169,7 +1171,6 @@ async def reklam(i, durum: str):
     await persist()
     await i.response.send_message(ok(f"Genel reklam şartı {'açıldı' if val else 'kapatıldı'}."))
 
-@bot.tree.command(name="reklam-komut", description="Owner: belirli bir komut için reklam şartı belirler.")
 async def reklam_komut(i, komut: str, durum: str):
     if not is_owner(i.user): return await i.response.send_message("Owner komutu.", ephemeral=True)
     val = durum.lower() in ("aç","ac","on","true","1")
@@ -1183,7 +1184,6 @@ async def reklam_komut(i, komut: str, durum: str):
     await persist()
     await i.response.send_message(ok(f"`/{komut}` reklam şartı {'açıldı' if val else 'kapatıldı'}."))
 
-@bot.tree.command(name="reklam-mesaj", description="Owner: reklam şartı mesajını ayarlar.")
 async def reklam_mesaj(i, *, message: str):
     if not is_owner(i.user): return await i.response.send_message("Owner komutu.", ephemeral=True)
     guild_data(i.guild.id)["advertising"]["message"] = message
@@ -1195,7 +1195,6 @@ async def pro(i):
     text = "∞ Süresiz Pro" if is_pro(i.user.id) and left == 0 else (f"{fmt_seconds(left)} kaldı" if left else "Pro aktif değil.")
     await i.response.send_message(embed=embed("Katre Pro ✦", f"Durum: **{text}**\n\nPro üyeler reklam katılım şartından muaftır ve bonus XP/coin kazanır.", discord.Color.gold()))
 
-@bot.tree.command(name="pro-ver", description="Owner: kullanıcıya süreli veya süresiz Pro verir.")
 async def pro_ver(i, member: discord.Member, sure: str = "30d"):
     if not is_owner(i.user): return await i.response.send_message("Owner komutu.", ephemeral=True)
     seconds = 0 if sure.lower() in ("süresiz","suresiz","permanent","∞","0") else human_duration(sure)
@@ -1204,7 +1203,6 @@ async def pro_ver(i, member: discord.Member, sure: str = "30d"):
     await persist()
     await i.response.send_message(ok(f"{member.mention} için **{'süresiz' if seconds==0 else fmt_seconds(seconds)} Pro** aktif edildi."))
 
-@bot.tree.command(name="pro-al", description="Owner: kullanıcının Pro'sunu kaldırır.")
 async def pro_al(i, member: discord.Member):
     if not is_owner(i.user): return await i.response.send_message("Owner komutu.", ephemeral=True)
     DB["global"]["pro_users"].pop(str(member.id), None)
@@ -1221,7 +1219,6 @@ async def pro_liste(i):
     await i.response.send_message(embed=embed("Pro Kullanıcıları", "\n".join(rows) or "Aktif Pro yok."), ephemeral=True)
 
 
-@bot.tree.command(name="emoji", description="Owner: bot emojilerini yönetir.")
 async def emoji_slash(i, islem: str = "liste", anahtar: Optional[str] = None, *, emoji: Optional[str] = None):
     if not is_owner(i.user):
         return  # Sessiz.
@@ -1325,7 +1322,6 @@ async def oneri(i, *, suggestion: str):
     await msg.add_reaction("👍"); await msg.add_reaction("👎")
     await i.response.send_message(ok("Önerin gönderildi."), ephemeral=True)
 
-@bot.tree.command(name="oneri-kanal", description="Öneri kanalını ayarlar.")
 @app_commands.checks.has_permissions(manage_guild=True)
 async def oneri_kanal(i, channel: Optional[discord.TextChannel] = None):
     guild_data(i.guild.id)["suggest_channel"]=channel.id if channel else None
@@ -1333,42 +1329,35 @@ async def oneri_kanal(i, channel: Optional[discord.TextChannel] = None):
 
 # ----------------------------- NOTES / CUSTOM / TAGS -----------------------------
 
-@bot.tree.command(name="not-ekle", description="Kendine not ekler.")
 async def not_ekle(i, *, text: str):
     user_data(i.user.id,i.guild.id)["notes"].append({"text":text,"at":now_ts()})
     await persist(); await i.response.send_message(ok("Not kaydedildi."), ephemeral=True)
 
-@bot.tree.command(name="notlar", description="Notlarını gösterir.")
 async def notlar(i):
     rows=user_data(i.user.id,i.guild.id)["notes"][-20:]
     text="\n".join(f"`{n}` <t:{x['at']}:R> — {x['text']}" for n,x in enumerate(rows,1))
     await i.response.send_message(embed=embed("Notlar",text or "Not yok."),ephemeral=True)
 
-@bot.tree.command(name="not-sil", description="Son notunu siler.")
 async def not_sil(i):
     notes=user_data(i.user.id,i.guild.id)["notes"]
     if not notes: return await i.response.send_message("Not yok.",ephemeral=True)
     notes.pop(); await persist(); await i.response.send_message(ok("Son not silindi."),ephemeral=True)
 
-@bot.tree.command(name="komut-ekle", description="Özel komut ekler.")
 @app_commands.checks.has_permissions(manage_guild=True)
 async def komut_ekle(i, name: str, response: str):
     guild_data(i.guild.id)["custom_commands"][name.lower()]={"text":response,"delete_trigger":False}
     await persist(); await i.response.send_message(ok(f"`{name}` özel komutu eklendi."))
 
-@bot.tree.command(name="komut-sil", description="Özel komut siler.")
 @app_commands.checks.has_permissions(manage_guild=True)
 async def komut_sil(i, name: str):
     guild_data(i.guild.id)["custom_commands"].pop(name.lower(),None)
     await persist(); await i.response.send_message(ok("Özel komut silindi."))
 
-@bot.tree.command(name="tag-ekle", description="Sunucu tag'i ekler.")
 @app_commands.checks.has_permissions(manage_guild=True)
 async def tag_ekle(i, name: str, text: str):
     guild_data(i.guild.id)["tags"][name.lower()] = text
     await persist(); await i.response.send_message(ok(f"`{name}` tag'i kaydedildi."))
 
-@bot.tree.command(name="tag", description="Bir tag gösterir.")
 async def tag(i, name: str):
     val=guild_data(i.guild.id)["tags"].get(name.lower())
     await i.response.send_message(val or "Bu tag bulunamadı.")
@@ -1389,7 +1378,6 @@ async def rol_al(i, member: discord.Member, role: discord.Role):
     await member.remove_roles(role, reason=f"Katre • {i.user}")
     await i.response.send_message(ok(f"{member.mention} → {role.mention} alındı."))
 
-@bot.tree.command(name="süreli-rol", description="Kullanıcıya süreli rol verir.")
 @app_commands.checks.has_permissions(manage_roles=True)
 async def sureli_rol(i, member: discord.Member, role: discord.Role, sure: str):
     if not role_targetable(i.guild, role, i.user): return await i.response.send_message("Bu rolü veremem.",ephemeral=True)
@@ -1400,7 +1388,6 @@ async def sureli_rol(i, member: discord.Member, role: discord.Role, sure: str):
     await persist()
     await i.response.send_message(ok(f"{member.mention} → {role.mention} **{fmt_seconds(seconds)}** verildi."))
 
-@bot.tree.command(name="levelrol", description="Seviyeye rol bağlar.")
 @app_commands.checks.has_permissions(manage_guild=True)
 async def levelrol(i, level: app_commands.Range[int,1,1000], role: Optional[discord.Role] = None):
     if role and not role_targetable(i.guild,role,i.user): return await i.response.send_message("Bu rolü veremem.",ephemeral=True)
@@ -1411,13 +1398,11 @@ async def levelrol(i, level: app_commands.Range[int,1,1000], role: Optional[disc
 
 # ----------------------------- GENİŞLETİLMİŞ SİSTEMLER -----------------------------
 
-@bot.tree.command(name="roller", description="Sunucudaki rolleri listeler.")
 async def roller(i):
     roles=[f"{r.mention} — `{r.id}`" for r in reversed(i.guild.roles) if r != i.guild.default_role]
     text="\n".join(roles[:50]) or "Rol yok."
     await i.response.send_message(embed=embed("Sunucu Rolleri", text))
 
-@bot.tree.command(name="kanallar", description="Sunucudaki kanalları listeler.")
 async def kanallar(i):
     cats={}
     for c in i.guild.channels:
@@ -1437,7 +1422,6 @@ async def rol(i, member: discord.Member, role: discord.Role, islem: str="ver"):
         text=f"{role.mention} rolü {member.mention} kullanıcısına verildi."
     await persist(); await i.response.send_message(ok(text))
 
-@bot.tree.command(name="herkese-rolver", description="Sunucudaki herkese rol verir.")
 @app_commands.checks.has_permissions(manage_roles=True)
 async def herkese_rolver(i, role: discord.Role):
     if not role_targetable(i.guild, role, i.user): return await i.response.send_message(no("Bu rolü veremem."), ephemeral=True)
@@ -1449,7 +1433,6 @@ async def herkese_rolver(i, role: discord.Role):
             except: pass
     await i.followup.send(ok(f"**{count}** üyeye {role.mention} verildi."))
 
-@bot.tree.command(name="herkesten-rolal", description="Sunucudaki herkesten rol alır.")
 @app_commands.checks.has_permissions(manage_roles=True)
 async def herkesten_rolal(i, role: discord.Role):
     if not role_targetable(i.guild, role, i.user): return await i.response.send_message(no("Bu role işlem yapamam."), ephemeral=True)
@@ -1460,7 +1443,6 @@ async def herkesten_rolal(i, role: discord.Role):
             except: pass
     await i.followup.send(ok(f"**{count}** üyeden {role.mention} alındı."))
 
-@bot.tree.command(name="isimdeğiştir", description="Üyenin takma adını değiştirir.")
 @app_commands.checks.has_permissions(manage_nicknames=True)
 async def isimdegistir(i, member: discord.Member, isim: str):
     try:
@@ -1469,7 +1451,6 @@ async def isimdegistir(i, member: discord.Member, isim: str):
     except discord.Forbidden:
         await i.response.send_message(no("Bu kullanıcının adını değiştiremiyorum."), ephemeral=True)
 
-@bot.tree.command(name="isimleri-sifirla", description="Sunucudaki takma adları temizler.")
 @app_commands.checks.has_permissions(manage_nicknames=True)
 async def isimleri_sifirla(i):
     await i.response.defer(); count=0
@@ -1479,21 +1460,18 @@ async def isimleri_sifirla(i):
             except: pass
     await i.followup.send(ok(f"**{count}** takma ad sıfırlandı."))
 
-@bot.tree.command(name="yavasmod", description="Kanalın yavaş modunu ayarlar.")
 @app_commands.checks.has_permissions(manage_channels=True)
 async def yavasmod(i, saniye: app_commands.Range[int,0,21600], channel: Optional[discord.TextChannel]=None):
     ch=channel or i.channel
     await ch.edit(slowmode_delay=saniye, reason=f"Katre /yavasmod • {i.user}")
     await i.response.send_message(ok(f"{ch.mention} yavaş modu **{saniye} saniye** olarak ayarlandı."))
 
-@bot.tree.command(name="yasaklilar", description="Sunucunun ban listesini gösterir.")
 @app_commands.checks.has_permissions(ban_members=True)
 async def yasaklilar(i):
     bans=[entry async for entry in i.guild.bans(limit=100)]
     text="\n".join(f"• `{e.user.id}` — {e.user} — {e.reason or 'Sebep yok'}" for e in bans) or "Banlı kullanıcı yok."
     await i.response.send_message(embed=embed("Ban Listesi", text[:3900]))
 
-@bot.tree.command(name="yasaklari-temizle", description="Sunucudaki tüm banları kaldırır.")
 @app_commands.checks.has_permissions(administrator=True)
 async def yasaklari_temizle(i):
     await i.response.defer(); count=0
@@ -1502,7 +1480,6 @@ async def yasaklari_temizle(i):
         except: pass
     await i.followup.send(ok(f"**{count}** ban kaldırıldı."))
 
-@bot.tree.command(name="yasakli-kanal", description="Katre'nin komutlarını kanalda engeller/açar.")
 @app_commands.checks.has_permissions(manage_guild=True)
 async def yasakli_kanal(i, durum: str, channel: Optional[discord.TextChannel]=None):
     cfg=guild_data(i.guild.id); arr=cfg.setdefault("blocked_channels",[]); cid=(channel or i.channel).id
@@ -1511,7 +1488,6 @@ async def yasakli_kanal(i, durum: str, channel: Optional[discord.TextChannel]=No
     elif not ac and cid not in arr: arr.append(cid)
     await persist(); await i.response.send_message(ok(f"{(channel or i.channel).mention} kanal ayarı güncellendi."))
 
-@bot.tree.command(name="yasakli-komut", description="Bir komutu bu sunucuda engeller/açar.")
 @app_commands.checks.has_permissions(manage_guild=True)
 async def yasakli_komut(i, komut: str, durum: str):
     cfg=guild_data(i.guild.id); arr=cfg.setdefault("blocked_commands",[]); name=komut.lower().lstrip("/")
@@ -1520,25 +1496,21 @@ async def yasakli_komut(i, komut: str, durum: str):
     elif not ac and name not in arr: arr.append(name)
     await persist(); await i.response.send_message(ok(f"`/{name}` komut ayarı güncellendi."))
 
-@bot.tree.command(name="yasakli-kelimeler", description="Yasaklı kelimeleri listeler.")
 @app_commands.checks.has_permissions(manage_guild=True)
 async def yasakli_kelimeler(i):
     words=guild_data(i.guild.id).get("automod_badwords",[])
     await i.response.send_message(embed=embed("Yasaklı Kelimeler", "\n".join(f"• `{w}`" for w in words) or "Yok."))
 
-@bot.tree.command(name="capslock", description="Capslock korumasını açar/kapatır.")
 @app_commands.checks.has_permissions(manage_guild=True)
 async def capslock(i, durum: str):
     guild_data(i.guild.id)["automod_caps"]=durum.lower() in ("ac","aç","on","true","1")
     await persist(); await i.response.send_message(ok("Capslock koruması güncellendi."))
 
-@bot.tree.command(name="koruma", description="Temel anti-raid korumasını açar/kapatır.")
 @app_commands.checks.has_permissions(administrator=True)
 async def koruma(i, durum: str):
     cfg=guild_data(i.guild.id); cfg["anti_raid"]=durum.lower() in ("ac","aç","on","true","1")
     await persist(); await i.response.send_message(ok(f"Anti-raid koruması **{'açık' if cfg['anti_raid'] else 'kapalı'}**."))
 
-@bot.tree.command(name="dogumgunu", description="Doğum günü tarihini ayarlar veya gösterir.")
 async def dogumgunu(i, tarih: Optional[str]=None, member: Optional[discord.Member]=None):
     m=member or i.user; u=user_data(m.id,i.guild.id)
     if member and member.id!=i.user.id and tarih: return await i.response.send_message(no("Başkasının doğum gününü değiştiremezsin."),ephemeral=True)
@@ -1547,13 +1519,11 @@ async def dogumgunu(i, tarih: Optional[str]=None, member: Optional[discord.Membe
         except ValueError: return await i.response.send_message(no("Tarih biçimi `GG.AA` olmalı."),ephemeral=True)
     await i.response.send_message(embed=embed("Doğum Günü",f"{m.mention} • **{u.get('birthday','Ayarlanmadı')}**"))
 
-@bot.tree.command(name="gorevli", description="Görevli rolünü ayarlar veya kaldırır.")
 @app_commands.checks.has_permissions(manage_guild=True)
 async def gorevli(i, role: Optional[discord.Role]=None):
     guild_data(i.guild.id)["staff_role"]=role.id if role else None
     await persist(); await i.response.send_message(ok("Görevli rolü güncellendi."))
 
-@bot.tree.command(name="gorevliler", description="Görevli üyeleri listeler.")
 async def gorevliler(i):
     rid=guild_data(i.guild.id).get("staff_role")
     role=i.guild.get_role(rid) if rid else None
@@ -1561,7 +1531,6 @@ async def gorevliler(i):
     text="\n".join(f"• {m.mention}" for m in members[:50]) or "Görevli yok."
     await i.response.send_message(embed=embed("Görevliler",text))
 
-@bot.tree.command(name="davetlink", description="Sunucu için kullanılabilir bir davet linki oluşturur.")
 @app_commands.checks.has_permissions(create_instant_invite=True)
 async def davetlink(i, channel: Optional[discord.TextChannel]=None):
     ch=channel or i.guild.system_channel or next((c for c in i.guild.text_channels if c.permissions_for(i.guild.me).create_instant_invite),None)
@@ -1569,7 +1538,6 @@ async def davetlink(i, channel: Optional[discord.TextChannel]=None):
     inv=await ch.create_invite(max_age=0,max_uses=0,reason=f"Katre /davetlink • {i.user}")
     await i.response.send_message(f"🔗 **Davet:** {inv.url}")
 
-@bot.tree.command(name="davetler", description="Sunucudaki davetleri listeler.")
 @app_commands.checks.has_permissions(manage_guild=True)
 async def davetler(i):
     try:
@@ -1579,38 +1547,32 @@ async def davetler(i):
     except discord.Forbidden: text="Davetleri okumak için gerekli yetki yok."
     await i.response.send_message(embed=embed("Davetler",text))
 
-@bot.tree.command(name="ozeloda", description="Sana özel geçici ses odası oluşturur.")
 async def ozeloda(i, isim: str="Özel Odam"):
     overwrites={i.guild.default_role: discord.PermissionOverwrite(connect=False), i.user: discord.PermissionOverwrite(connect=True,manage_channels=True)}
     ch=await i.guild.create_voice_channel(isim[:100],overwrites=overwrites,reason=f"Katre /ozeloda • {i.user}")
     await i.response.send_message(ok(f"Özel odan oluşturuldu: {ch.mention}"))
 
-@bot.tree.command(name="oda-kapat", description="Bulunduğun özel ses odasını kapatır.")
 async def oda_kapat(i):
     ch=i.user.voice.channel if i.user.voice else None
     if not ch or not ch.overwrites_for(i.user).manage_channels: return await i.response.send_message(no("Sahibi olduğun bir özel odada değilsin."),ephemeral=True)
     await ch.delete(reason=f"Katre /oda-kapat • {i.user}")
 
-@bot.tree.command(name="tkm", description="Taş-kağıt-makas oyna.")
 async def tkm(i, secim: str):
     choices=["taş","kağıt","makas"]; s=secim.lower(); botc=random.choice(choices)
     if s not in choices: return await i.response.send_message(no("Taş, kağıt veya makas yaz."),ephemeral=True)
     win=(s==botc) and "Berabere!" or (s,botc) in [("taş","makas"),("kağıt","taş"),("makas","kağıt")] and "Kazandın!" or "Kaybettin!"
     await i.response.send_message(embed=embed("Taş • Kağıt • Makas",f"Sen: **{s}**\nKatre: **{botc}**\n\n**{win}**"))
 
-@bot.tree.command(name="yazitura", description="Yazı-tura tahmini yap.")
 async def yazitura(i, tahmin: str):
     result=random.choice(["yazı","tura"]); t=tahmin.lower(); correct=t==result
     u=user_data(i.user.id,i.guild.id); amount=50 if correct else -25; u["coins"]=max(0,u["coins"]+amount); await persist()
     await i.response.send_message(embed=embed("Yazı Tura",f"Sonuç: **{result}**\n{'Kazandın' if correct else 'Kaybettin'} → **{amount:+} Coin**"))
 
-@bot.tree.command(name="zar", description="1-6 arasında zar atar.")
 async def zar(i, tahmin: Optional[int]=None):
     n=random.randint(1,6); text=f"🎲 Zar: **{n}**"
     if tahmin: text+=f"\nTahminin: **{tahmin}** → {'Doğru!' if tahmin==n else 'Yanlış.'}"
     await i.response.send_message(text)
 
-@bot.tree.command(name="slot", description="Basit slot oyunu.")
 async def slot(i):
     u=user_data(i.user.id,i.guild.id)
     if u["coins"]<10: return await i.response.send_message(no("Slot için en az 10 Coin gerekli."),ephemeral=True)
@@ -1620,11 +1582,9 @@ async def slot(i):
     else: win=0
     await persist(); await i.response.send_message(embed=embed("Slot", " | ".join(a)+f"\n\nÖdül: **{win} Coin**"))
 
-@bot.tree.command(name="terscevir", description="Metni ters çevirir.")
 async def terscevir(i, metin: str):
     await i.response.send_message(metin[::-1])
 
-@bot.tree.command(name="hesap", description="Basit matematik hesabı yapar.")
 async def hesap(i, ifade: str):
     allowed=set("0123456789+-*/(). %")
     if len(ifade)>100 or any(c not in allowed for c in ifade): return await i.response.send_message(no("Sadece temel matematik işlemleri kullanılabilir."),ephemeral=True)
@@ -1632,27 +1592,22 @@ async def hesap(i, ifade: str):
     except: return await i.response.send_message(no("İfade hesaplanamadı."),ephemeral=True)
     await i.response.send_message(f"🧮 `{ifade}` = **{result}**")
 
-@bot.tree.command(name="surecevir", description="Saniyeyi okunabilir süreye çevirir.")
 async def surecevir(i, saniye: app_commands.Range[int,0,999999999]):
     await i.response.send_message(f"⏱️ **{fmt_seconds(saniye)}**")
 
-@bot.tree.command(name="rastgele", description="İki sayı arasında rastgele sayı seçer.")
 async def rastgele(i, minimum: int=1, maksimum: int=100):
     if minimum>maksimum: minimum,maksimum=maksimum,minimum
     await i.response.send_message(f"🎲 Sonuç: **{random.randint(minimum,maksimum)}**")
 
-@bot.tree.command(name="renk", description="Hex renk bilgisi gösterir.")
 async def renk(i, hexkod: str):
     h=hexkod.strip().lstrip("#")
     if len(h)!=6 or any(c not in "0123456789abcdefABCDEF" for c in h): return await i.response.send_message(no("Örnek: `#5865F2`"),ephemeral=True)
     c=discord.Color(int(h,16)); await i.response.send_message(embed=embed("Renk",f"**HEX:** `#{h.upper()}`\n**RGB:** `{c.r}, {c.g}, {c.b}`",c))
 
-@bot.tree.command(name="id", description="Kullanıcı, rol veya kanal ID'sini gösterir.")
 async def id_cmd(i, member: Optional[discord.Member]=None, role: Optional[discord.Role]=None, channel: Optional[discord.TextChannel]=None):
     obj=member or role or channel or i.user
     await i.response.send_message(f"🔎 **{getattr(obj,'name',getattr(obj,'display_name',str(obj)))}** → `{obj.id}`")
 
-@bot.tree.command(name="metin", description="Mesaj ve aktivite istatistiklerini gösterir.")
 async def metin(i, member: Optional[discord.Member]=None):
     m=member or i.user; u=user_data(m.id,i.guild.id)
     await i.response.send_message(embed=embed("Kullanıcı İstatistikleri",f"{m.mention}\nXP: **{u['xp']}**\nSeviye: **{level_for_xp(u['xp'])}**\nRep: **{u['rep']}**\nCoin: **{u['coins']}**"))
@@ -1663,7 +1618,6 @@ async def profile(i, member: Optional[discord.Member]=None):
     e=embed(f"{m.display_name} Profili",f"Seviye **{level_for_xp(u['xp'])}** • `{u['xp']} XP`\nRep **{u['rep']}** • Coin **{u['coins']:,}**\nPro: **{'Evet' if is_pro(m.id) else 'Hayır'}**")
     e.set_thumbnail(url=m.display_avatar.url); await i.response.send_message(embed=e)
 
-@bot.tree.command(name="shard", description="Bot shard bilgilerini gösterir.")
 async def shard(i):
     await i.response.send_message(embed=embed("Shard",f"Shard ID: `{i.guild.shard_id}`\nPing: `{round(bot.latency*1000)}ms`\nShard sayısı: `{bot.shard_count or 1}`"))
 
@@ -1671,7 +1625,6 @@ async def shard(i):
 async def support(i):
     await i.response.send_message(embed=embed("Katre Destek",SUPPORT_URL or "Destek bağlantısı henüz ayarlanmadı."))
 
-@bot.tree.command(name="music", description="Katre müzik sisteminin durumunu gösterir.")
 async def music(i):
     await i.response.send_message(embed=embed("Müzik", "Katre'nin müzik altyapısı için ses kanalında olman gerekir. Bu sürümde müzik kuyruğu henüz aktif değil."))
 
@@ -1697,24 +1650,20 @@ async def envanter(i):
     inv=user_data(i.user.id,i.guild.id).get("inventory",[])
     await i.response.send_message(embed=embed("Envanter", "\n".join(f"• {x}" for x in inv) or "Envanter boş."))
 
-@bot.tree.command(name="istatistik-kur", description="İstatistik kanalını ayarlar.")
 @app_commands.checks.has_permissions(manage_guild=True)
 async def istatistik_kur(i, channel: Optional[discord.TextChannel]=None):
     guild_data(i.guild.id)["stats_channel"]= (channel or i.channel).id
     await persist(); await i.response.send_message(ok("İstatistik kanalı ayarlandı."))
 
-@bot.tree.command(name="logkur", description="Log kanalını hızlıca ayarlar.")
 @app_commands.checks.has_permissions(manage_guild=True)
 async def logkur(i, channel: Optional[discord.TextChannel]=None):
     guild_data(i.guild.id)["log_channel"]=(channel or i.channel).id
     await persist(); await i.response.send_message(ok("Log kanalı ayarlandı."))
 
-@bot.tree.command(name="logkaldir", description="Log kanalını kaldırır.")
 @app_commands.checks.has_permissions(manage_guild=True)
 async def logkaldir(i):
     guild_data(i.guild.id)["log_channel"]=None; await persist(); await i.response.send_message(ok("Log kapatıldı."))
 
-@bot.tree.command(name="reset", description="Seçilen sunucu ayarını sıfırlar.")
 @app_commands.checks.has_permissions(administrator=True)
 async def reset(i, hedef: str):
     cfg=guild_data(i.guild.id)
@@ -1723,12 +1672,10 @@ async def reset(i, hedef: str):
     if not key: return await i.response.send_message(no("Geçerli hedef: `log`, `modlog`, `hosgeldin`, `otorol`, `ticket`, `oneri`"),ephemeral=True)
     cfg[key]=None; await persist(); await i.response.send_message(ok(f"`{hedef}` ayarı sıfırlandı."))
 
-@bot.tree.command(name="embed", description="Basit embed mesajı gönderir.")
 @app_commands.checks.has_permissions(manage_messages=True)
 async def embed_cmd(i, baslik: str, mesaj: str):
     await i.response.send_message(embed=embed(baslik,mesaj))
 
-@bot.tree.command(name="say", description="Bir sayı veya istatistik sayar.")
 async def say(i, member: Optional[discord.Member]=None):
     if member: text=f"{member.mention} • katılma sırası bilgisi mevcut üye sayısı: **{i.guild.member_count}**"
     else: text=f"👥 Bu sunucuda **{i.guild.member_count}** üye var."
@@ -1757,7 +1704,6 @@ class KatreRoleView(discord.ui.View):
         super().__init__(timeout=180)
         self.add_item(KatreRoleButton(role_id))
 
-@bot.tree.command(name="butonrol", description="Butonlu rol paneli oluşturur.")
 @app_commands.checks.has_permissions(manage_roles=True)
 async def butonrol(i, role: discord.Role, baslik: str="Rol Seçimi"):
     if not role_targetable(i.guild,role,i.user): return await i.response.send_message(no("Bu rolü veremem."),ephemeral=True)
@@ -1787,7 +1733,6 @@ class KatreMenuView(discord.ui.View):
     def __init__(self, role_ids):
         super().__init__(timeout=180); self.add_item(KatreSelect(role_ids))
 
-@bot.tree.command(name="menurol", description="Menülü rol paneli oluşturur.")
 @app_commands.checks.has_permissions(manage_roles=True)
 async def menurol(i, rol1: discord.Role, rol2: Optional[discord.Role]=None, rol3: Optional[discord.Role]=None, rol4: Optional[discord.Role]=None, rol5: Optional[discord.Role]=None):
     roles=[r for r in [rol1,rol2,rol3,rol4,rol5] if r]
@@ -1795,24 +1740,19 @@ async def menurol(i, rol1: discord.Role, rol2: Optional[discord.Role]=None, rol3
     e=embed("Rol Menüsü","Aşağıdaki menüden rolünü seçebilirsin.\n\n"+"\n".join(f"• {r.mention}" for r in roles))
     await i.response.send_message(embed=e,view=KatreMenuView([r.id for r in roles]))
 
-@bot.tree.command(name="konustur", description="Belirtilen metni bot mesajı olarak gönderir.")
 @app_commands.checks.has_permissions(manage_messages=True)
 async def konustur(i, metin: str):
     await i.response.send_message(ok("Mesaj gönderildi."),ephemeral=True); await i.channel.send(metin)
 
-@bot.tree.command(name="tweet", description="Metni sahte tweet biçiminde gönderir.")
 async def tweet(i, metin: str):
     await i.response.send_message(embed=embed("𝕏 Tweet",f"**{i.user.display_name}**\n\n{metin}"))
 
-@bot.tree.command(name="pankart", description="Pankart metni oluşturur.")
 async def pankart(i, metin: str):
     await i.response.send_message(f"╔════════════════════╗\n║  **{discord.utils.escape_markdown(metin[:50])}**  ║\n╚════════════════════╝")
 
-@bot.tree.command(name="clyde", description="Clyde tarzı sahte mesaj oluşturur.")
 async def clyde(i, metin: str):
     await i.response.send_message(embed=embed("Clyde",f"**{i.user.display_name}** adlı kullanıcı için sahte mesaj:\n\n> {metin}"))
 
-@bot.tree.command(name="pet", description="Pet sahiplen ve seviyesini göster.")
 async def pet(i, isim: Optional[str]=None):
     u=user_data(i.user.id,i.guild.id); p=u.get("pet")
     if isim:
@@ -1820,51 +1760,42 @@ async def pet(i, isim: Optional[str]=None):
     if not p: return await i.response.send_message("🐾 Henüz petin yok. `/pet isim:Kedi` ile sahiplen.")
     await i.response.send_message(embed=embed("Pet",f"🐾 **{p['name']}**\nSeviye: **{p['level']}**"))
 
-@bot.tree.command(name="ciftlik", description="Basit çiftlik durumunu gösterir.")
 async def ciftlik(i):
     u=user_data(i.user.id,i.guild.id); farm=u.setdefault("farm",{"level":1,"wheat":0})
     farm["wheat"]+=1; await persist()
     await i.response.send_message(embed=embed("Çiftlik",f"🌾 Çiftlik seviyesi: **{farm['level']}**\nBu işlemle buğday: **{farm['wheat']}**"))
 
-@bot.tree.command(name="mayintarlasi", description="Basit mayın tarlası mini oyunu.")
 async def mayintarlasi(i, secim: Optional[int]=None):
     mine=random.randint(1,25); pick=secim or random.randint(1,25)
     if pick<1 or pick>25: return await i.response.send_message(no("1-25 arasında seçim yap."),ephemeral=True)
     await i.response.send_message(embed=embed("Mayın Tarlası",f"Seçimin: **{pick}**\n{'💥 Mayına bastın!' if pick==mine else '🟩 Güvenli!'}"))
 
-@bot.tree.command(name="adamasmaca", description="Kelimeyi tahmin et.")
 async def adamasmaca(i, harf: str):
     word=random.choice(["discord","katre","sunucu","bot","merhaba"]); h=harf.lower()[:1]
     mask=" ".join(c if c==h else "_" for c in word)
     await i.response.send_message(embed=embed("Adam Asmaca",f"Kelime: `{mask}`\nİpucu: **{len(word)} harf**"))
 
-@bot.tree.command(name="kelimebulmaca", description="Wordle tarzı mini tahmin oyunu.")
 async def kelimebulmaca(i, tahmin: str):
     word=random.choice(["katre","discord","botcu","sunucu"]); t=tahmin.lower()
     if len(t)!=len(word): return await i.response.send_message(no(f"Kelime **{len(word)} harf** olmalı."),ephemeral=True)
     out=" ".join("🟩" if a==b else ("🟨" if a in word else "⬛") for a,b in zip(t,word))
     await i.response.send_message(embed=embed("Kelime Bulmaca",f"Tahmin: `{t}`\n{out}"))
 
-@bot.tree.command(name="xox", description="3x3 XOX oyunu başlatır.")
 async def xox(i):
     board=["⬜"]*9
     await i.response.send_message(embed=embed("XOX", " | ".join(board[:3])+"\n"+" | ".join(board[3:6])+"\n"+" | ".join(board[6:])))
 
-@bot.tree.command(name="sudoku", description="Sudoku mini oyunu hakkında bilgi verir.")
 async def sudoku(i):
     await i.response.send_message(embed=embed("Sudoku","Katre Sudoku mini oyunu: kolay / orta / zor seviyeleri için oyun altyapısı hazırlandı; bu sürümde çözüm paneli yerine mini oyun bilgilendirmesi gösterilir."))
 
-@bot.tree.command(name="qr", description="QR kodu için güvenli dış bağlantı oluşturur.")
 async def qr(i, metin: str):
     from urllib.parse import quote
     url=f"https://api.qrserver.com/v1/create-qr-code/?size=300x300&data={quote(metin)}"
     await i.response.send_message(embed=embed("QR Kod",f"[QR görselini aç]({url})"))
 
-@bot.tree.command(name="bugun", description="Bugünün tarihini gösterir.")
 async def bugun(i):
     await i.response.send_message(f"📅 Bugün: **{datetime.now().strftime('%d.%m.%Y')}**")
 
-@bot.tree.command(name="goal", description="Sunucu üye hedefini gösterir.")
 async def goal(i):
     hedef=guild_data(i.guild.id).get("member_goal",1000)
     await i.response.send_message(embed=embed("Üye Hedefi",f"Mevcut: **{i.guild.member_count}**\nHedef: **{hedef}**\nİlerleme: **{min(100,i.guild.member_count/hesdef*100 if (hesdef:=hedef) else 0):.1f}%**"))
@@ -2071,6 +2002,147 @@ async def emoji_command(ctx, action: str = "liste", key: str = None, *, value: s
     await ctx.send(f"{E('info')} Kullanım: `k!emoji liste` • `k!emoji ayarla <anahtar> <emoji>` • `k!emoji sıfırla`")
 
 
+# ----------------------------- PREFIX COMMAND REGISTRY -----------------------------
+# Slash sayısı düşük tutulur; diğer komutlar k! ile kullanılmaya devam eder.
+PREFIX_ONLY_COMMANDS = {
+    'prefix': globals()['prefix'],
+    'log': globals()['log_cmd'],
+    'modlog': globals()['modlog'],
+    'hosgeldin': globals()['hosgeldin'],
+    'otorol': globals()['otorol'],
+    'reklam-sunucu': globals()['reklam_sunucu'],
+    'reklam': globals()['reklam'],
+    'reklam-komut': globals()['reklam_komut'],
+    'reklam-mesaj': globals()['reklam_mesaj'],
+    'pro-ver': globals()['pro_ver'],
+    'pro-al': globals()['pro_al'],
+    'emoji': globals()['emoji_slash'],
+    'oneri-kanal': globals()['oneri_kanal'],
+    'not-ekle': globals()['not_ekle'],
+    'notlar': globals()['notlar'],
+    'not-sil': globals()['not_sil'],
+    'komut-ekle': globals()['komut_ekle'],
+    'komut-sil': globals()['komut_sil'],
+    'tag-ekle': globals()['tag_ekle'],
+    'tag': globals()['tag'],
+    'süreli-rol': globals()['sureli_rol'],
+    'levelrol': globals()['levelrol'],
+    'roller': globals()['roller'],
+    'kanallar': globals()['kanallar'],
+    'herkese-rolver': globals()['herkese_rolver'],
+    'herkesten-rolal': globals()['herkesten_rolal'],
+    'isimdeğiştir': globals()['isimdegistir'],
+    'isimleri-sifirla': globals()['isimleri_sifirla'],
+    'yavasmod': globals()['yavasmod'],
+    'yasaklilar': globals()['yasaklilar'],
+    'yasaklari-temizle': globals()['yasaklari_temizle'],
+    'yasakli-kanal': globals()['yasakli_kanal'],
+    'yasakli-komut': globals()['yasakli_komut'],
+    'yasakli-kelimeler': globals()['yasakli_kelimeler'],
+    'capslock': globals()['capslock'],
+    'koruma': globals()['koruma'],
+    'dogumgunu': globals()['dogumgunu'],
+    'gorevli': globals()['gorevli'],
+    'gorevliler': globals()['gorevliler'],
+    'davetlink': globals()['davetlink'],
+    'davetler': globals()['davetler'],
+    'ozeloda': globals()['ozeloda'],
+    'oda-kapat': globals()['oda_kapat'],
+    'tkm': globals()['tkm'],
+    'yazitura': globals()['yazitura'],
+    'zar': globals()['zar'],
+    'slot': globals()['slot'],
+    'terscevir': globals()['terscevir'],
+    'hesap': globals()['hesap'],
+    'surecevir': globals()['surecevir'],
+    'rastgele': globals()['rastgele'],
+    'renk': globals()['renk'],
+    'id': globals()['id_cmd'],
+    'metin': globals()['metin'],
+    'shard': globals()['shard'],
+    'music': globals()['music'],
+    'istatistik-kur': globals()['istatistik_kur'],
+    'logkur': globals()['logkur'],
+    'logkaldir': globals()['logkaldir'],
+    'reset': globals()['reset'],
+    'embed': globals()['embed_cmd'],
+    'say': globals()['say'],
+    'butonrol': globals()['butonrol'],
+    'menurol': globals()['menurol'],
+    'konustur': globals()['konustur'],
+    'tweet': globals()['tweet'],
+    'pankart': globals()['pankart'],
+    'clyde': globals()['clyde'],
+    'pet': globals()['pet'],
+    'ciftlik': globals()['ciftlik'],
+    'mayintarlasi': globals()['mayintarlasi'],
+    'adamasmaca': globals()['adamasmaca'],
+    'kelimebulmaca': globals()['kelimebulmaca'],
+    'xox': globals()['xox'],
+    'sudoku': globals()['sudoku'],
+    'qr': globals()['qr'],
+    'bugun': globals()['bugun'],
+    'goal': globals()['goal'],
+}
+
+# Slash komutlarındaki Discord yetkilerini k! köprüsüne de uygularız.
+PREFIX_PERMISSION_REQUIREMENTS = {
+    'ban': ('ban_members',),
+    'unban': ('ban_members',),
+    'kick': ('kick_members',),
+    'timeout': ('moderate_members',),
+    'untimeout': ('moderate_members',),
+    'sil': ('manage_messages',),
+    'kilit': ('manage_channels',),
+    'uyar': ('moderate_members',),
+    'uyarilar': ('moderate_members',),
+    'prefix': ('manage_guild',),
+    'log': ('manage_guild',),
+    'modlog': ('manage_guild',),
+    'hosgeldin': ('manage_guild',),
+    'otorol': ('manage_roles',),
+    'ayarlar': ('manage_guild',),
+    'otomod': ('manage_guild',),
+    'otomod-link': ('manage_guild',),
+    'otomod-davet': ('manage_guild',),
+    'yasakli-kelime': ('manage_guild',),
+    'ticket-panel': ('manage_guild',),
+    'ticket-ayarla': ('manage_guild',),
+    'cekilis': ('manage_guild',),
+    'oneri-kanal': ('manage_guild',),
+    'komut-ekle': ('manage_guild',),
+    'komut-sil': ('manage_guild',),
+    'tag-ekle': ('manage_guild',),
+    'rol-ver': ('manage_roles',),
+    'rol-al': ('manage_roles',),
+    'süreli-rol': ('manage_roles',),
+    'levelrol': ('manage_guild',),
+    'rol': ('manage_roles',),
+    'herkese-rolver': ('manage_roles',),
+    'herkesten-rolal': ('manage_roles',),
+    'isimdeğiştir': ('manage_nicknames',),
+    'isimleri-sifirla': ('manage_nicknames',),
+    'yavasmod': ('manage_channels',),
+    'yasaklilar': ('ban_members',),
+    'yasaklari-temizle': ('administrator',),
+    'yasakli-kanal': ('manage_guild',),
+    'yasakli-komut': ('manage_guild',),
+    'yasakli-kelimeler': ('manage_guild',),
+    'capslock': ('manage_guild',),
+    'koruma': ('administrator',),
+    'gorevli': ('manage_guild',),
+    'davetlink': ('create_instant_invite',),
+    'davetler': ('manage_guild',),
+    'istatistik-kur': ('manage_guild',),
+    'logkur': ('manage_guild',),
+    'logkaldir': ('manage_guild',),
+    'reset': ('administrator',),
+    'embed': ('manage_messages',),
+    'butonrol': ('manage_roles',),
+    'menurol': ('manage_roles',),
+    'konustur': ('manage_messages',),
+}
+
 # ----------------------------- PREFIX QUICK COMMANDS -----------------------------
 
 @bot.command(name="ping")
@@ -2079,7 +2151,7 @@ async def prefix_ping(ctx):
 
 @bot.command(name="yardim")
 async def prefix_help(ctx):
-    await ctx.send("Katre: `/yardim` kullanarak tüm slash komutlarını görebilirsin.")
+    await ctx.send("Katre: `/yardim` önemli slash komutlarını gösterir. Diğer özellikleri `k!komut` ile kullanabilirsin.")
 
 # ----------------------------- PREFIX CHECKS -----------------------------
 
