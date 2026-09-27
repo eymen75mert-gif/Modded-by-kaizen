@@ -123,10 +123,9 @@ class HelpView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=180)
         self.add_item(HelpSelect())
-    @discord.ui.button(label="Davet / Bilgi", style=discord.ButtonStyle.link,
-                       url="https://discord.com/developers/applications")
-    async def info(self, interaction, button):
-        pass
+        self.add_item(discord.ui.Button(
+            label="Davet / Bilgi", emoji="🔗", style=discord.ButtonStyle.link,
+            url="https://discord.com/developers/applications"))
 
 class HelpSelect(discord.ui.Select):
     def __init__(self):
