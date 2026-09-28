@@ -1,5 +1,5 @@
 # ═══════════════════════════════════════════════════════════════════════════
-#  💧 KATRE BOT v3.7 — TEK DOSYA • SAYFALI YARDIM • BUTONLU OYLAMA • TEMP VOICE
+#  💧 KATRE BOT v3.7.1 — TEK DOSYA • SAYFALI YARDIM • BUTONLU OYLAMA • TEMP VOICE
 #  ─ ENV: BOT_TOKEN, OWNER_ID, SUPPORT_URL, BACKUP_CHANNEL_ID
 #  ─ pip install -U discord.py
 # ═══════════════════════════════════════════════════════════════════════════
@@ -19,13 +19,12 @@ MARKER      = "#KATRE_YEDEK"
 DIV = "──────────────────────────────"
 PAGE_SIZE = 15
 
-BOT_VERSION = "3.7"
+BOT_VERSION = "3.7.1"
 CHANGELOG = {
- "3.7": ["📚 Yardım kategorileri SAYFALI (15 komut/sayfa, ◀ ▶ butonları)",
-         "⏱️ Menü 'zaman aşımı' hatası kesin çözüldü (defer sistemi)",
-         "📖 Yeni: k!komutbilgi <komut> — tek komut detayı",
-         "🔧 Bot yetkisi eksikse artık net mesaj veriyor"],
- "3.5.2": ["🗳️ Oylama fix", "😴 AFK güzelleştirme", "☁️ Ayarlar bulut yedeği"],
+ "3.7.1": ["📚 Sayfalı yardım menüsü (◀ ▶ butonları) — girinti hatası düzeltildi",
+           "🚫 Ana menüden ok işaretleri kaldırıldı",
+           "⏱️ Menü zaman aşımı hatası kesin çözüldü"],
+ "3.7": ["📚 Sayfalı yardım", "📖 k!komutbilgi", "🔧 Bot yetki mesajı"],
 }
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -335,6 +334,7 @@ CAT_DESC = {"genel":"Rank, profil, avatar, snipe, AFK, oda ve genel araçlar","m
 "fun":"Quiz, slot, aşk, butonlu anket ve oyunlar","give":"Butonlu çekiliş, reroll ve sonuç paneli",
 "pro":"Pro üyelere özel oda, renk, tag, boost","owner":"Owner + Half Owner yönetim paneli"}
 def cat_count(b, k): return len([c for c in b.commands if getattr(c, "kategori", None) == k])
+
 def help_content(bot):
     L = [e("logo") + " **" + bot.user.name.upper() + " YARDIM MENÜSÜ**", DIV,
          "Selam, ben **" + bot.user.name + "!** " + e("spark"),
@@ -347,7 +347,6 @@ def help_content(bot):
     return "\n".join(L)
 
 def cat_content(bot, key, page=1):
-    """📚 SAYFALI kategori listesi — 2000 limitine asla takılmaz"""
     cmds = sorted([c for c in bot.commands if getattr(c, "kategori", None) == key], key=lambda x: x.name)
     pages = [cmds[i:i+PAGE_SIZE] for i in range(0, len(cmds), PAGE_SIZE)] or [[]]
     page = max(1, min(page, len(pages)))
@@ -386,8 +385,10 @@ class HelpView(View):
         try:
             content = it.message.content or ""
             key = None
-               for k, (i, n) in CATS.items():
-                if "**" + n.upper() in content: key = k; break
+            for k in CATS:
+                if "**" + CATS[k][1].upper() in content:
+                    key = k
+                    break
             if not key:
                 return await it.response.send_message(WN("MENÜ", "Önce menüden bir kategori seç."), ephemeral=True)
             m = re.search(r"Sayfa (\d+)/(\d+)", content)
@@ -1891,7 +1892,7 @@ async def zenginler(ctx):
     rs = db.all("SELECT * FROM users ORDER BY coins DESC LIMIT 10")
     if not rs: return await rp(ctx, e("coin") + " Veri yok.")
     L = [head("coin", "EN ZENGİNLER")]
-    md = ["🥇","","🥉"]
+    md = ["🥇","🥈","🥉"]
     for i, r in enumerate(rs):
         L.append((md[i] if i < 3 else "**" + str(i+1) + ".**") + " <@" + str(r["user_id"]) + "> ─ **" + format(r["coins"], ",").replace(",", ".") + "** coin")
     await rp(ctx, "\n".join(L))
@@ -1991,7 +1992,7 @@ async def aşk(ctx, u: discord.Member):
 @kategori("fun")
 @bot.command(name="slot", help="Slot")
 async def slot(ctx):
-    s = ["🍒","","🍇","","7️","🔔"]; r = [random.choice(s) for _ in range(3)]
+    s = ["🍒","🍋","🍇","💎","7️⃣",""]; r = [random.choice(s) for _ in range(3)]
     w = len(set(r)) == 1
     await rp(ctx, head("slot", "SLOT") + "\n┃ " + " ┃ ".join(r) + " ┃\n" + ("**JACKPOT!**" if w else "Olmadı..."))
 @kategori("fun")
