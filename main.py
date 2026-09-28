@@ -1,5 +1,5 @@
 # ═══════════════════════════════════════════════════════════════════════════
-#  💧 KATRE BOT v3.4 — TEK DOSYA • BAKIM MESAJI • RESTART • KALICI BUTONLAR
+#  💧 KATRE BOT v3.5 — TEK DOSYA • TEMP VOICE • SÜRELİ MUTE • OTO CEZA
 #  ─ ENV: BOT_TOKEN, OWNER_ID, SUPPORT_URL, BACKUP_CHANNEL_ID
 #  ─ pip install -U discord.py
 # ═══════════════════════════════════════════════════════════════════════════
@@ -18,13 +18,13 @@ BACKUP_CH   = int(os.getenv("BACKUP_CHANNEL_ID", "0"))
 MARKER      = "#KATRE_YEDEK"
 DIV = "──────────────────────────────"
 
-BOT_VERSION = "3.4"
+BOT_VERSION = "3.5"
 CHANGELOG = {
- "3.4": ["🔧 Bakım modu açıkken komutlara BAKIMDAYIZ mesajı (null değil)",
-         "🔄 k!restart — bot kendini yeniden başlatır",
-         "🛡️ Kalıcı butonlar: restart/redeploy sonrası eski butonlar çalışır",
-         "📢 Güncelleme bildirim sistemi entegre"],
- "3.3": ["📢 Güncelleme bildirim sistemi", "👥 Half Owner sistemi", "🔓 unban/banlist"],
+ "3.5": ["🎤 Temp Voice: özel ses odaları (kurulum + kontrol paneli)",
+         "🔇 Süreli mute/unmute + ceza geçmişi",
+         "⚖️ Otomatik ceza zinciri (3 uyarı=mute, 5 uyarı=ban)",
+         "🛡️ Kalıcı butonlar + bakım mesajı + restart (v3.4'ten)"],
+ "3.4": ["🔧 Bakım modu mesajı", "🔄 k!restart", "🛡️ Kalıcı butonlar"],
 }
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -69,6 +69,11 @@ class DB:
         CREATE TABLE IF NOT EXISTS level_roles(id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id INTEGER, level INTEGER, role_id INTEGER);
         CREATE TABLE IF NOT EXISTS guild_logs(guild_id INTEGER PRIMARY KEY, channel_id INTEGER);
         CREATE TABLE IF NOT EXISTS emojis(slot TEXT PRIMARY KEY, emoji TEXT);
+        CREATE TABLE IF NOT EXISTS tempvoice(guild_id INTEGER PRIMARY KEY, trigger_ch INTEGER, category_id INTEGER);
+        CREATE TABLE IF NOT EXISTS temp_channels(channel_id INTEGER PRIMARY KEY, owner_id INTEGER, guild_id INTEGER);
+        CREATE TABLE IF NOT EXISTS punishments(id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id INTEGER, user_id INTEGER,
+            type TEXT, reason TEXT, by_id INTEGER, ts TEXT, duration INTEGER);
+        CREATE TABLE IF NOT EXISTS punish_config(guild_id INTEGER PRIMARY KEY, mute_at INTEGER DEFAULT 3, ban_at INTEGER DEFAULT 5);
         INSERT OR IGNORE INTO owner_settings(id) VALUES (1);
         """)
         for tbl, col, typ in (("users","pro_tag","TEXT"),("users","xp2","INTEGER DEFAULT 0"),("tickets","claimed_by","INTEGER")):
@@ -87,6 +92,9 @@ def ensure_user(u, n): db.q("INSERT OR IGNORE INTO users(user_id,name) VALUES(?,
 def ensure_server(g): db.q("INSERT OR IGNORE INTO servers(guild_id) VALUES(?)", (g,))
 def pro_log(u, a, d=0, b=0):
     db.q("INSERT INTO pro_logs(user_id,action,days,by_id,ts) VALUES(?,?,?,?,?)", (u, a, d, b, datetime.datetime.now().isoformat()))
+def punish_log(gid, uid, typ, reason, by, dur=None):
+    db.q("INSERT INTO punishments(guild_id,user_id,type,reason,by_id,ts,duration) VALUES(?,?,?,?,?,?,?)",
+         (gid, uid, typ, reason, by, datetime.datetime.now().isoformat(), dur))
 def is_half_owner(uid): return db.one("SELECT 1 FROM half_owners WHERE user_id=?", (uid,)) is not None
 def is_maintenance():
     r = db.one("SELECT maintenance FROM owner_settings WHERE id=1")
@@ -130,7 +138,7 @@ EMO_MAP = {"check":["check","tick","tik","onay","yes","success"],"cross":["cross
 "pick":["pick","kazma","mine"],"ticket":["ticket","bilet"],"clip":["clip","pano","basvuru"],"pen":["pen","kalem"],
 "cam":["cam","kamera"],"sleep":["sleep","afk","uyku"],"wave":["wave","el","hello"],"cake":["cake","kek","dogum"],
 "alarm":["alarm","saat","clock"],"fire":["fire","ates","flame"],"bolt":["bolt","simsek","zap","boost"],
-"mic":["mic","mikrofon"],"palette":["palette","palet","renk","color"],"tag":["tag","rozet","badge"],
+"mic":["mic","mikrofon","ses","voice"],"palette":["palette","palet","renk","color"],"tag":["tag","rozet","badge"],
 "robot":["robot","bot"],"target":["target","hedef","sayac"],"log":["log","kayit"],"search":["search","ara"],
 "time":["time","sure","hourglass"],"home":["home","ana"],"trash":["trash","cop","sil"],"link":["link","baglanti"]}
 SLOT_TR = {"logo":"Bot logosu","check":"Başarı/onay","cross":"Hata/red","warn":"Uyarı","info":"Bilgi","dot":"Nokta",
@@ -219,7 +227,7 @@ async def pull_backup(bot, kind):
         traceback.print_exc(); return None
 
 # ═══════════════════════════════════════════════════════════════════════════
-# ✍️ MARKDOWN UI + GÜNCELLEME BİLDİRİMİ
+# ✍️ MARKDOWN UI + GÜNCELLEME
 # ═══════════════════════════════════════════════════════════════════════════
 def head(icon, title): return e(icon) + " **" + title + "**\n" + DIV
 def OK(t, b=None): return head("check", t) + ("\n" + b if b else "")
@@ -250,7 +258,6 @@ def fancy(t):
     return "".join(o)
 
 async def check_update(bot):
-    """📢 Sürüm değiştiyse bildirim kanalına duyuru atar"""
     try:
         row = db.one("SELECT value FROM bot_meta WHERE key='update_ch'")
         ch_id = int(row["value"]) if row else int(os.getenv("UPDATE_CHANNEL_ID", "0") or 0)
@@ -300,8 +307,8 @@ def kategori(a):
 
 CATS = {"genel":("genel","Genel & Sistem"),"mod":("mod","Moderasyon & Koruma"),"sys":("sys","Başvuru & Otomasyon"),
 "eco":("eco","Ekonomi"),"fun":("fun","Eğlence"),"give":("give","Çekiliş"),"pro":("pro","Pro"),"owner":("owner","Owner")}
-CAT_DESC = {"genel":"Rank, profil, avatar, snipe, AFK ve genel araçlar","mod":"Ban, kick, unban, uyarı, koruma ve toplu rol",
-"sys":"Başvuru, ticket, oto-cevap, sayaç, seviye rol ve log","eco":"Coin, günlük, çalışma, balık, maden, market",
+CAT_DESC = {"genel":"Rank, profil, avatar, snipe, AFK, oda ve genel araçlar","mod":"Ban, kick, unban, mute, uyarı, oto-ceza, koruma",
+"sys":"Başvuru, ticket, temp voice, oto-cevap, sayaç, log","eco":"Coin, günlük, çalışma, balık, maden, market",
 "fun":"Quiz, slot, aşk, oylama ve oyunlar","give":"Butonlu çekiliş, reroll ve sonuç paneli",
 "pro":"Pro üyelere özel oda, renk, tag, boost","owner":"Owner + Half Owner yönetim paneli"}
 def cat_count(b, k): return len([c for c in b.commands if getattr(c, "kategori", None) == k])
@@ -323,7 +330,7 @@ def cat_content(bot, key):
     return "\n".join(L)
 
 # ═══════════════════════════════════════════════════════════════════════════
-# 🔘 VIEW'LAR (🛡️ KALICI: custom_id + timeout=None → restart sonrası çalışır)
+# 🔘 VIEW'LAR (🛡️ KALICI)
 # ═══════════════════════════════════════════════════════════════════════════
 class HelpSelect(Select):
     def __init__(self, bot):
@@ -337,7 +344,7 @@ class HelpSelect(Select):
         await it.response.edit_message(content=cat_content(self.bot, self.values[0]), view=self.view)
 class HelpView(View):
     def __init__(self, bot):
-        super().__init__(timeout=None); self.bot = bot   # 🛡️ kalıcı
+        super().__init__(timeout=None); self.bot = bot
         self.add_item(HelpSelect(bot))
     @discord.ui.button(label="Ana Menü", style=discord.ButtonStyle.success, emoji="❓", row=1, custom_id="kh_home")
     async def home(self, it, b): await it.response.edit_message(content=help_content(self.bot), view=self)
@@ -378,7 +385,7 @@ class SetupConfirmView(View):
 
 class OwnerPanelView(View):
     def __init__(self, bot):
-        super().__init__(timeout=None); self.bot = bot   # 🛡️ kalıcı
+        super().__init__(timeout=None); self.bot = bot
     async def g(self, it):
         if it.user.id != OWNER_ID:
             await it.response.send_message(ER("YETKİ YOK"), ephemeral=True); return False
@@ -636,6 +643,74 @@ class AppReviewView(View):
             except Exception: pass
         await it.response.send_message(ER("RED", "<@" + str(a["user_id"]) + ">"))
 
+# ─────────────── 🎤 TEMP VOICE PANELİ (KALICI) ───────────────
+class TVNameModal(Modal, title="Oda İsmi"):
+    def __init__(self, ch_id):
+        super().__init__(); self.ch_id = ch_id
+        self.name_in = TextInput(label="Yeni isim", max_length=50)
+        self.add_item(self.name_in)
+    async def on_submit(self, it):
+        ch = it.client.get_channel(self.ch_id)
+        if not ch: return await it.response.send_message(ER("ODA YOK"), ephemeral=True)
+        await ch.edit(name=self.name_in.value[:50])
+        await it.response.send_message(OK("İSİM DEĞİŞTİ", ch.name), ephemeral=True)
+class TVLimitModal(Modal, title="Oda Limiti"):
+    def __init__(self, ch_id):
+        super().__init__(); self.ch_id = ch_id
+        self.lim = TextInput(label="Limit (0 = sınırsız, max 99)", max_length=2)
+        self.add_item(self.lim)
+    async def on_submit(self, it):
+        ch = it.client.get_channel(self.ch_id)
+        if not ch: return await it.response.send_message(ER("ODA YOK"), ephemeral=True)
+        try: n = max(0, min(99, int(self.lim.value)))
+        except ValueError: n = 0
+        await ch.edit(user_limit=n if n else None)
+        await it.response.send_message(OK("LİMİT", str(n) if n else "Sınırsız"), ephemeral=True)
+
+class TVPanel(View):
+    def __init__(self, ch_id):
+        super().__init__(timeout=None)
+        self.ch_id = ch_id
+        for label, style, emoji, cid, cb in [
+            ("Kilitle/Aç", discord.ButtonStyle.secondary, "🔒", "tv_lock", self.cb_lock),
+            ("İsim", discord.ButtonStyle.primary, "✏️", "tv_name", self.cb_name),
+            ("Limit", discord.ButtonStyle.primary, "👥", "tv_limit", self.cb_limit),
+            ("Davet", discord.ButtonStyle.success, "➕", "tv_inv", self.cb_inv),
+            ("Odayı Sil", discord.ButtonStyle.danger, "🗑️", "tv_del", self.cb_del)]:
+            btn = Button(label=label, style=style, emoji=emoji, custom_id=cid + "_" + str(ch_id))
+            btn.callback = cb
+            self.add_item(btn)
+    async def owner_check(self, it):
+        row = db.one("SELECT * FROM temp_channels WHERE channel_id=?", (self.ch_id,))
+        if not row or row["owner_id"] != it.user.id:
+            await it.response.send_message(ER("YETKİ YOK", "Bu odanın sahibi değilsin."), ephemeral=True); return None
+        ch = it.client.get_channel(self.ch_id)
+        if not ch:
+            await it.response.send_message(ER("ODA YOK", "Kanal silinmiş."), ephemeral=True); return None
+        return ch
+    async def cb_lock(self, it):
+        ch = await self.owner_check(it)
+        if not ch: return
+        cur = ch.overwrites_for(ch.guild.default_role)
+        locked = cur.connect is False
+        await ch.set_permissions(ch.guild.default_role, connect=None if locked else False, view_channel=None if locked else False)
+        await it.response.send_message(OK("KİLİT", "Oda açıldı 🔓" if locked else "Oda kilitlendi 🔒"), ephemeral=True)
+    async def cb_name(self, it):
+        if await self.owner_check(it): await it.response.send_modal(TVNameModal(self.ch_id))
+    async def cb_limit(self, it):
+        if await self.owner_check(it): await it.response.send_modal(TVLimitModal(self.ch_id))
+    async def cb_inv(self, it):
+        ch = await self.owner_check(it)
+        if not ch: return
+        inv = await ch.create_invite(max_uses=1, max_age=3600)
+        await it.response.send_message(OK("DAVET LİNKİ", inv.url), ephemeral=True)
+    async def cb_del(self, it):
+        ch = await self.owner_check(it)
+        if not ch: return
+        db.q("DELETE FROM temp_channels WHERE channel_id=?", (self.ch_id,))
+        await ch.delete(reason="Sahibi sildi")
+        await it.response.send_message(OK("ODA SİLİNDİ"), ephemeral=True)
+
 # ═══════════════════════════════════════════════════════════════════════════
 # 🤖 BOT
 # ═══════════════════════════════════════════════════════════════════════════
@@ -658,7 +733,6 @@ class KatreBot(commands.Bot):
         return list(b)
     async def setup_hook(self):
         self.gwv = GiveawayView(self)
-        # 🛡️ KALICI VIEW'LAR: restart/redeploy sonrası eski butonlar çalışır
         for v in (self.gwv, TicketOpenView(), TicketView(), AppOpenView(), HelpView(self), OwnerPanelView(self)):
             self.add_view(v)
         self.status_loop.start(); self.gw_checker.start(); self.pro_checker.start(); self.backup_loop.start()
@@ -670,6 +744,7 @@ class KatreBot(commands.Bot):
                 roles = [(rid, g.get_role(rid).name) for rid in json.loads(r["role_ids"]) if g.get_role(rid)]
                 if roles: self.add_view(RoleMenuView(r["menu_id"], roles))
             for r in db.all("SELECT id FROM applications WHERE status='pending'"): self.add_view(AppReviewView(r["id"]))
+            for r in db.all("SELECT channel_id FROM temp_channels"): self.add_view(TVPanel(r["channel_id"]))
             if not EMO_CACHE:
                 for g in self.guilds:
                     if auto_map_emojis(g): break
@@ -697,7 +772,7 @@ class KatreBot(commands.Bot):
         ms = [(discord.ActivityType.watching, "k!yardım | Katre Bot"), (discord.ActivityType.playing, str(len(self.guilds)) + " sunucuda"),
               (discord.ActivityType.listening, str(sum(g.member_count or 0 for g in self.guilds)) + " kullanıcıya"),
               (discord.ActivityType.competing, "k!quiz ile yarış"), (discord.ActivityType.watching, "Owner: " + on),
-              (discord.ActivityType.playing, "k!pro ayrıcalıkları"), (discord.ActivityType.listening, "k!başvuru-panel")]
+              (discord.ActivityType.playing, "k!pro ayrıcalıkları"), (discord.ActivityType.listening, "k!tempvoice 🎤")]
         t, m = ms[self._si % len(ms)]; self._si += 1
         try: await self.change_presence(activity=discord.Activity(type=t, name=m))
         except Exception: pass
@@ -771,7 +846,6 @@ class KatreBot(commands.Bot):
     async def on_message(self, m):
         if m.author.bot: return
         try:
-            # 🔧 BAKIM MODU: null yerine BAKIMDAYIZ mesajı (komut denemelerine, 30sn'de 1)
             if is_maintenance() and m.author.id != OWNER_ID:
                 prefs = await self.get_prefix(m)
                 if m.content and any(m.content.startswith(p) for p in prefs):
@@ -779,10 +853,7 @@ class KatreBot(commands.Bot):
                     if nw - MAINT_CD.get(m.author.id, 0) > 30:
                         MAINT_CD[m.author.id] = nw
                         try:
-                            await m.channel.send(head("warn", "BAKIMDAYIZ") + "\n" +
-                                e("gear") + " Katre Bot şu anda **bakım modunda**, komutlar geçici olarak kapalı.\n" +
-                                e("time") + " En kısa sürede geri döneceğiz!\n" +
-                                e("link") + " Destek: " + SUPPORT_URL)
+                            await m.channel.send(head("warn", "BAKIMDAYIZ") + "\n" + e("gear") + " Katre Bot şu anda **bakım modunda**, komutlar geçici olarak kapalı.\n" + e("time") + " En kısa sürede geri döneceğiz!\n" + e("link") + " Destek: " + SUPPORT_URL)
                         except Exception: pass
                 return
             if db.one("SELECT 1 FROM blacklist WHERE user_id=?", (m.author.id,)): return
@@ -832,6 +903,33 @@ class KatreBot(commands.Bot):
                     db.q("UPDATE users SET xp=?,level=? WHERE user_id=?", (xp, lv, m.author.id))
         except Exception: traceback.print_exc()
         await self.process_commands(m)
+    async def on_voice_state_update(self, member, before, after):
+        """🎤 TEMP VOICE: tetikleyiciye giren oda kurar, boşalan oda silinir"""
+        try:
+            guild = member.guild
+            tv = db.one("SELECT * FROM tempvoice WHERE guild_id=?", (guild.id,))
+            if tv and after.channel and after.channel.id == tv["trigger_ch"]:
+                cat = guild.get_channel(tv["category_id"]) if tv["category_id"] else after.channel.category
+                ow = {guild.default_role: discord.PermissionOverwrite(view_channel=False, connect=False),
+                      member: discord.PermissionOverwrite(view_channel=True, connect=True, manage_channels=True,
+                                                          mute_members=True, move_members=True, priority_speaker=True),
+                      guild.me: discord.PermissionOverwrite(view_channel=True, connect=True, manage_channels=True, move_members=True)}
+                ch = await guild.create_voice_channel("🔊 " + member.display_name, category=cat, overwrites=ow)
+                db.q("INSERT OR REPLACE INTO temp_channels(channel_id,owner_id,guild_id) VALUES(?,?,?)", (ch.id, member.id, guild.id))
+                self.add_view(TVPanel(ch.id))
+                await member.move_to(ch, reason="Temp voice")
+                try:
+                    await member.send(head("mic", "ÖZEL ODAN HAZIR!") + "\n**" + ch.name + "**\nAşağıdaki panelden odayı yönet.", view=TVPanel(ch.id))
+                except Exception: pass
+            for chn in (before.channel, after.channel):
+                if not chn: continue
+                row = db.one("SELECT * FROM temp_channels WHERE channel_id=?", (chn.id,))
+                if row and len(chn.members) == 0:
+                    db.q("DELETE FROM temp_channels WHERE channel_id=?", (chn.id,))
+                    try: await chn.delete(reason="Oda boşaldı")
+                    except Exception: pass
+        except Exception:
+            traceback.print_exc()
     async def on_message_edit(self, b, a):
         if b.author.bot or not b.guild or b.content == a.content: return
         await guild_log_send(b.guild, head("pen", "MESAJ DÜZENLENDİ") + "\n" + b.author.mention + " " + b.channel.mention +
@@ -925,7 +1023,7 @@ class KatreBot(commands.Bot):
         ch = g.system_channel or next((c for c in g.text_channels if c.permissions_for(g.me).send_messages), None)
         if ch:
             v = View(); v.add_item(Button(label="Destek", url=SUPPORT_URL, style=discord.ButtonStyle.link, emoji="🔗"))
-            await ch.send(head("logo", "KATRE BOT ARANIZDA") + "\n`k!yardım` • `k!kurulum` • `k!başvuru-panel` • `k!koruma antispam aç`", v)
+            await ch.send(head("logo", "KATRE BOT ARANIZDA") + "\n`k!yardım` • `k!kurulum` • `k!tempvoice` • `k!koruma antispam aç`", v)
 
 async def finalize_giveaway(bot, mid):
     gw = db.one("SELECT * FROM giveaways WHERE message_id=?", (mid,))
@@ -994,6 +1092,35 @@ async def avatar(ctx, u: discord.Member = None):
     v = View(); v.add_item(Button(label="Tarayıcıda Aç", url=u.display_avatar.url, style=discord.ButtonStyle.link, emoji="🔗"))
     await rp(ctx, head("cam", u.display_name.upper() + " AVATAR") + "\n" + u.display_avatar.url, v)
 @kategori("genel")
+@bot.command(name="oda", help="<isim/limit/kilit/davet/sil> [değer] — Özel odanı yönet")
+async def oda(ctx, i: str = "bilgi", *, arg=None):
+    row = db.one("SELECT * FROM temp_channels WHERE owner_id=? AND guild_id=?", (ctx.author.id, ctx.guild.id))
+    if not row: return await rp(ctx, ER("ODAN YOK", "Temp voice kanalına girerek oda kur."))
+    ch = ctx.guild.get_channel(row["channel_id"])
+    if not ch:
+        db.q("DELETE FROM temp_channels WHERE channel_id=?", (row["channel_id"],))
+        return await rp(ctx, ER("ODA YOK", "Odan silinmiş."))
+    i = i.lower()
+    if i == "isim" and arg:
+        await ch.edit(name=arg[:50]); await rp(ctx, OK("İSİM", ch.name))
+    elif i == "limit" and arg:
+        try: n = max(0, min(99, int(arg)))
+        except ValueError: return await rp(ctx, ER("GEÇERSİZ", "0-99"))
+        await ch.edit(user_limit=n if n else None); await rp(ctx, OK("LİMİT", str(n) if n else "Sınırsız"))
+    elif i == "kilit":
+        cur = ch.overwrites_for(ctx.guild.default_role)
+        locked = cur.connect is False
+        await ch.set_permissions(ctx.guild.default_role, connect=None if locked else False, view_channel=None if locked else False)
+        await rp(ctx, OK("KİLİT", "Oda açıldı 🔓" if locked else "Oda kilitlendi 🔒"))
+    elif i == "davet":
+        inv = await ch.create_invite(max_uses=1, max_age=3600)
+        await rp(ctx, OK("DAVET", inv.url))
+    elif i == "sil":
+        db.q("DELETE FROM temp_channels WHERE channel_id=?", (ch.id,)); await ch.delete(reason="Sahibi sildi")
+        await rp(ctx, OK("ODA SİLİNDİ"))
+    else:
+        await rp(ctx, head("mic", "ODAN: " + ch.name) + "\n`k!oda isim <yeni>` • `k!oda limit <0-99>` • `k!oda kilit` • `k!oda davet` • `k!oda sil`")
+@kategori("genel")
 @bot.command(name="rank", aliases=["seviye","level"], help="Seviye kartı")
 @commands.cooldown(1, 3, commands.BucketType.user)
 async def rank(ctx, u: discord.Member = None):
@@ -1012,7 +1139,7 @@ async def sıralama(ctx):
     rs = db.all("SELECT * FROM users ORDER BY level DESC, xp DESC LIMIT 10")
     if not rs: return await rp(ctx, e("chart") + " Henüz veri yok.")
     L = [head("star", "SUNUCU SIRALAMASI")]
-    md = ["🥇","🥈","🥉"]
+    md = ["🥇","","🥉"]
     for i, r in enumerate(rs):
         L.append((md[i] if i < 3 else "**" + str(i+1) + ".**") + " <@" + str(r["user_id"]) + ">" +
                  (" " + e("pro") if r["pro"] else "") + " ─ Lv.**" + str(r["level"]) + "** • `" + str(r["xp"]) + " XP`")
@@ -1122,7 +1249,7 @@ async def botkontrol(ctx):
     await rp(ctx, head("gear", "BOT KONTROL #" + ctx.channel.name) + "\n" + "\n".join((e("check") if ok else e("cross")) + " " + n for n, ok in cs))
 
 # ═══════════════════════════════════════════════════════════════════════════
-# 🛡️ MOD
+# 🛡️ MOD (+ MUTE + OTO CEZA)
 # ═══════════════════════════════════════════════════════════════════════════
 @kategori("mod")
 @bot.command(name="yasakla", aliases=["ban"], help="<@üye> [sebep]")
@@ -1138,6 +1265,7 @@ async def yasakla(ctx, u: discord.Member, *, s="Belirtilmedi"):
         try: await u.send(ER("BAN", ctx.guild.name + " • " + s))
         except Exception: pass
         await u.ban(reason=str(ctx.author)+" | "+s)
+        punish_log(ctx.guild.id, u.id, "BAN", s, ctx.author.id)
         await guild_log_send(ctx.guild, head("hammer", "BAN") + "\n" + u.mention + " › " + s + " › " + ctx.author.mention)
         await rp(ctx, head("hammer", "YASAKLAMA") + "\n" + u.mention + " › " + s)
 @kategori("mod")
@@ -1152,8 +1280,54 @@ async def at(ctx, u: discord.Member, *, s="Belirtilmedi"):
     if v.value is None: return await rp(ctx, WN("ZAMAN AŞIMI"))
     if v.value:
         await u.kick(reason=str(ctx.author)+" | "+s)
+        punish_log(ctx.guild.id, u.id, "KICK", s, ctx.author.id)
         await guild_log_send(ctx.guild, head("kick", "KICK") + "\n" + u.mention + " › " + s)
         await rp(ctx, head("kick", "ATILDI") + "\n" + u.mention)
+@kategori("mod")
+@bot.command(name="mute", aliases=["sustur"], help="<@üye> <süre> [sebep] — Süreli sustur (30m/1h/2d)")
+@commands.has_permissions(moderate_members=True)
+@commands.bot_has_permissions(moderate_members=True)
+async def mute(ctx, u: discord.Member, süre: str, *, s="Belirtilmedi"):
+    g = mod_guard(ctx, u, "sustur")
+    if g: return await rp(ctx, ER("OLMAZ", g))
+    try: dk = parse_sure(süre)
+    except Exception: return await rp(ctx, ER("SÜRE", "`30m` `1h` `2d`"))
+    if dk < 1 or dk > 40320: return await rp(ctx, ER("SÜRE", "1 dk – 28 gün arası."))
+    await u.timeout(datetime.timedelta(minutes=dk), reason=str(ctx.author)+" | "+s)
+    punish_log(ctx.guild.id, u.id, "MUTE", s, ctx.author.id, dk)
+    await guild_log_send(ctx.guild, head("lock", "MUTE") + "\n" + u.mention + " › **" + süre + "** › " + s)
+    await rp(ctx, OK("SUSTURULDU", u.mention + " › **" + süre + "**\nSebep: " + s))
+@kategori("mod")
+@bot.command(name="unmute", aliases=["susturmaç"], help="<@üye> — Susturmayı kaldırır")
+@commands.has_permissions(moderate_members=True)
+@commands.bot_has_permissions(moderate_members=True)
+async def unmute(ctx, u: discord.Member, *, s="Belirtilmedi"):
+    await u.timeout(None, reason=str(ctx.author)+" | "+s)
+    punish_log(ctx.guild.id, u.id, "UNMUTE", s, ctx.author.id)
+    await rp(ctx, OK("SUSTURMA KALDIRILDI", u.mention))
+@kategori("mod")
+@bot.command(name="ceza-sistemi", aliases=["cezasistemi"], help="<ayarla <mute_u> <ban_u>|kapat|bilgi> — Oto ceza zinciri")
+@commands.has_permissions(administrator=True)
+async def ceza_sistemi(ctx, i: str = "bilgi", a: int = 3, b: int = 5):
+    i = i.lower()
+    if i in ("ayarla","aç"):
+        db.q("INSERT OR REPLACE INTO punish_config(guild_id,mute_at,ban_at) VALUES(?,?,?)", (ctx.guild.id, a, b))
+        await rp(ctx, OK("CEZA SİSTEMİ", "**" + str(a) + " uyarı → 1 saat mute**\n**" + str(b) + " uyarı → 1 gün ban**"))
+    elif i in ("kapat","off"):
+        db.q("DELETE FROM punish_config WHERE guild_id=?", (ctx.guild.id,))
+        await rp(ctx, OK("CEZA SİSTEMİ", "Kapatıldı."))
+    else:
+        c = db.one("SELECT * FROM punish_config WHERE guild_id=?", (ctx.guild.id,))
+        await rp(ctx, head("shield", "CEZA SİSTEMİ") + "\n" + (str(c["mute_at"]) + " uyarı → 1s mute • " + str(c["ban_at"]) + " uyarı → 1g ban" if c else "Kapalı. Kur: `k!ceza-sistemi ayarla 3 5`"))
+@kategori("mod")
+@bot.command(name="ceza-geçmişi", aliases=["cezalar","sicil"], help="[<@üye>] — Ceza geçmişi")
+@commands.has_permissions(manage_messages=True)
+async def ceza_geçmişi(ctx, u: discord.Member = None):
+    u = u or ctx.author
+    rs = db.all("SELECT * FROM punishments WHERE guild_id=? AND user_id=? ORDER BY id DESC LIMIT 10", (ctx.guild.id, u.id))
+    if not rs: return await rp(ctx, e("shield") + " " + u.mention + " temiz sicil.")
+    await rp(ctx, head("log", u.display_name.upper() + " CEZA GEÇMİŞİ") + "\n" + "\n".join(
+        e("arrow") + " **" + r["type"] + "** › " + (r["reason"] or "—")[:40] + " › " + r["ts"][:10] + ((" › " + str(r["duration"]) + "dk") if r["duration"] else "") for r in rs))
 @kategori("mod")
 @bot.command(name="unban", help="<user_id> [sebep] — Ban kaldırır")
 @commands.has_permissions(ban_members=True)
@@ -1203,13 +1377,29 @@ async def rolbilgi(ctx, role: discord.Role):
         (e("dot")+"ID", role.id), (e("dot")+"Üye", len(role.members)), (e("dot")+"Renk", str(role.color)),
         (e("dot")+"Etiket", role.mention), (e("time")+"Oluşturma", "<t:"+str(int(role.created_at.timestamp()))+":D>")]))
 @kategori("mod")
-@bot.command(name="uyar", aliases=["warn"], help="<@üye> [sebep]")
+@bot.command(name="uyar", aliases=["warn"], help="<@üye> [sebep] — Uyarı (oto ceza tetikler)")
 @commands.has_permissions(manage_messages=True)
 async def uyar(ctx, u: discord.Member, *, s="Belirtilmedi"):
     if u.id == ctx.author.id: return await rp(ctx, ER("OLMAZ", "Kendini uyaramazsın!"))
     ensure_user(u.id, str(u)); db.q("UPDATE users SET warnings=warnings+1 WHERE user_id=?", (u.id,))
     w = db.one("SELECT warnings FROM users WHERE user_id=?", (u.id,))["warnings"]
-    await rp(ctx, head("warn", "UYARI") + "\n" + u.mention + " › toplam **" + str(w) + "**")
+    punish_log(ctx.guild.id, u.id, "WARN", s, ctx.author.id)
+    extra = ""
+    cfg = db.one("SELECT * FROM punish_config WHERE guild_id=?", (ctx.guild.id,))
+    if cfg:
+        if w == cfg["ban_at"]:
+            try:
+                await u.ban(reason="Oto ceza: " + str(w) + " uyarı")
+                punish_log(ctx.guild.id, u.id, "AUTO-BAN", str(w) + " uyarı", ctx.bot.user.id)
+                extra = "\n" + e("hammer") + " **" + str(w) + " uyarı → OTOMATİK BAN (1 gün yerine kalıcı)**"
+            except Exception: pass
+        elif w == cfg["mute_at"]:
+            try:
+                await u.timeout(datetime.timedelta(minutes=60), reason="Oto ceza: " + str(w) + " uyarı")
+                punish_log(ctx.guild.id, u.id, "AUTO-MUTE", str(w) + " uyarı", ctx.bot.user.id, 60)
+                extra = "\n" + e("lock") + " **" + str(w) + " uyarı → 1 SAAT OTOMATİK SUSTURMA**"
+            except Exception: pass
+    await rp(ctx, head("warn", "UYARI") + "\n" + u.mention + " › toplam **" + str(w) + "**" + extra)
 @kategori("mod")
 @bot.command(name="uyarılar", aliases=["warns"], help="[<@üye>]")
 async def uyarılar(ctx, u: discord.Member = None):
@@ -1390,13 +1580,32 @@ async def kurulum(ctx):
         owy = {g.default_role: discord.PermissionOverwrite(view_channel=False), ry: discord.PermissionOverwrite(view_channel=True), rm: discord.PermissionOverwrite(view_channel=True)}
         await g.create_text_channel("yetkili-sohbet", category=k4, overwrites=owy); ck += 1
         ensure_server(g.id); db.q("UPDATE servers SET welcome_ch=? WHERE guild_id=?", (hg.id, g.id))
-        await rp(ctx, OK("KURULUM BİTTİ", "4 kategori • " + str(ck) + " kanal • 4 rol\nHoşgeldin: " + hg.mention))
+        await rp(ctx, OK("KURULUM BİTTİ", "4 kategori • " + str(ck) + " kanal • 4 rol\nHoşgeldin: " + hg.mention + "\n🎤 Ses sistemi: `k!tempvoice`"))
     except discord.Forbidden: await rp(ctx, ER("YETKİ", "Kanal+Rol yönet gerekli."))
     except Exception as ex: await rp(ctx, ER("HATA", "```\n" + str(ex)[:300] + "\n```"))
 
 # ═══════════════════════════════════════════════════════════════════════════
-# 📋 SİSTEMLER
+# 📋 SİSTEMLER (+ TEMP VOICE KURULUM)
 # ═══════════════════════════════════════════════════════════════════════════
+@kategori("sys")
+@bot.command(name="tempvoice", aliases=["geçicises"], help="[kur|#seskanalı|kapat] — Temp voice sistemi")
+@commands.has_permissions(administrator=True)
+@commands.bot_has_permissions(manage_channels=True, move_members=True)
+async def tempvoice(ctx, *, arg=None):
+    if arg and arg.lower() in ("kapat","off","0"):
+        db.q("DELETE FROM tempvoice WHERE guild_id=?", (ctx.guild.id,))
+        return await rp(ctx, OK("TEMP VOICE", "Sistem kapatıldı."))
+    if arg:
+        ch = await commands.VoiceChannelConverter().convert(ctx, arg)
+        db.q("INSERT OR REPLACE INTO tempvoice(guild_id,trigger_ch,category_id) VALUES(?,?,?)",
+             (ctx.guild.id, ch.id, ch.category.id if ch.category else None))
+        await rp(ctx, OK("TEMP VOICE", ch.mention + " artık tetikleyici kanal.\nGiren üye kendi odasını kurar!"))
+    else:
+        cat = await ctx.guild.create_category("ÖZEL ODALAR")
+        trig = await cat.create_voice_channel("➕ Katıl & Oda Kur")
+        await trig.set_permissions(ctx.guild.default_role, view_channel=True, connect=True, speak=False)
+        db.q("INSERT OR REPLACE INTO tempvoice(guild_id,trigger_ch,category_id) VALUES(?,?,?)", (ctx.guild.id, trig.id, cat.id))
+        await rp(ctx, OK("TEMP VOICE KURULDU", trig.mention + " kanalına giren **kendi özel odasını** kurar.\nOda boşalınca otomatik silinir.\nYönetim: DM paneli veya `k!oda`"))
 @kategori("sys")
 @bot.command(name="ticket", help="<kapat/bilgi/listele> — Ticket yönetimi")
 async def ticket(ctx, i: str = "bilgi"):
@@ -1601,10 +1810,10 @@ async def eightball(ctx, *, s):
 @bot.command(name="yazıtura", aliases=["coin"], help="Yazı tura")
 async def yazıtura(ctx): await rp(ctx, e("dice") + " Sonuç: **" + random.choice(["YAZI", "TURA"]) + "**")
 @kategori("fun")
-@bot.command(name="zar", aliases=["dice"], help="Zar")
+@bot.command(name="zar", help="Zar")
 async def zar(ctx):
     r = random.randint(1, 6)
-    await rp(ctx, e("dice") + " Zar: **" + str(r) + "** " + ["⚀","⚁","⚂","⚃","⚄","⚅"][r-1])
+    await rp(ctx, e("dice") + " Zar: **" + str(r) + "** " + ["⚀","","⚂","","⚄",""][r-1])
 @kategori("fun")
 @bot.command(name="aşk", aliases=["ask","love"], help="<@üye> aşk ölçer")
 async def aşk(ctx, u: discord.Member):
@@ -1614,7 +1823,7 @@ async def aşk(ctx, u: discord.Member):
 @kategori("fun")
 @bot.command(name="slot", help="Slot")
 async def slot(ctx):
-    s = ["🍒","","🍇","","7️",""]; r = [random.choice(s) for _ in range(3)]
+    s = ["🍒","","🍇","💎","7️⃣","🔔"]; r = [random.choice(s) for _ in range(3)]
     w = len(set(r)) == 1
     await rp(ctx, head("slot", "SLOT") + "\n┃ " + " ┃ ".join(r) + " ┃\n" + ("**JACKPOT!**" if w else "Olmadı..."))
 @kategori("fun")
@@ -1643,7 +1852,7 @@ async def burç(ctx, *, b):
 @bot.command(name="oylama", aliases=["anket"], help="<soru>")
 async def oylama(ctx, *, s):
     m = await rp(ctx, head("chart", "OYLAMA") + "\n### " + s[:200] + "\n\n👍 Evet • 👎 Hayır • 🤷 Çekimser")
-    for r in ("👍","👎",""): await m.add_reaction(r)
+    for r in ("👍","","🤷"): await m.add_reaction(r)
 @kategori("fun")
 @bot.command(name="quiz", aliases=["bilgi"], help="Yarışma +75 coin")
 @commands.cooldown(1, 10, commands.BucketType.user)
@@ -1797,7 +2006,7 @@ async def proxp(ctx):
     await rp(ctx, OK("BOOST", "2x AÇIK" if n else "2x KAPALI"))
 
 # ═══════════════════════════════════════════════════════════════════════════
-# 👑 OWNER + HALF OWNER + SİSTEM KOMUTLARI
+# 👑 OWNER + HALF OWNER
 # ═══════════════════════════════════════════════════════════════════════════
 @kategori("owner")
 @bot.command(name="halfowner", aliases=["coowner","yardımcıowner"], help="<ayarla/kaldır/bilgi/liste> [@üye]")
