@@ -1,5 +1,5 @@
 # ═══════════════════════════════════════════════════════════════════════════
-#  💧 KATRE BOT v3.5 — TEK DOSYA • TEMP VOICE • SÜRELİ MUTE • OTO CEZA
+#  💧 KATRE BOT v3.5.1 — TEK DOSYA • BUTONLU OYLAMA • TEMP VOICE • MUTE
 #  ─ ENV: BOT_TOKEN, OWNER_ID, SUPPORT_URL, BACKUP_CHANNEL_ID
 #  ─ pip install -U discord.py
 # ═══════════════════════════════════════════════════════════════════════════
@@ -18,13 +18,12 @@ BACKUP_CH   = int(os.getenv("BACKUP_CHANNEL_ID", "0"))
 MARKER      = "#KATRE_YEDEK"
 DIV = "──────────────────────────────"
 
-BOT_VERSION = "3.5"
+BOT_VERSION = "3.5.1"
 CHANGELOG = {
- "3.5": ["🎤 Temp Voice: özel ses odaları (kurulum + kontrol paneli)",
-         "🔇 Süreli mute/unmute + ceza geçmişi",
-         "⚖️ Otomatik ceza zinciri (3 uyarı=mute, 5 uyarı=ban)",
-         "🛡️ Kalıcı butonlar + bakım mesajı + restart (v3.4'ten)"],
- "3.4": ["🔧 Bakım modu mesajı", "🔄 k!restart", "🛡️ Kalıcı butonlar"],
+ "3.5.1": ["🗳️ Oylama artık BUTONLU: tek oy, değiştirilemez, nitro emojili",
+           "🗳️ Özel seçenek: k!oylama Soru | A | B | C (max 5)",
+           "🔒 Anketi sadece sahibi veya yönetici kapatır"],
+ "3.5": ["🎤 Temp Voice sistemi", "🔇 Süreli mute + oto ceza zinciri"],
 }
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -74,6 +73,9 @@ class DB:
         CREATE TABLE IF NOT EXISTS punishments(id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id INTEGER, user_id INTEGER,
             type TEXT, reason TEXT, by_id INTEGER, ts TEXT, duration INTEGER);
         CREATE TABLE IF NOT EXISTS punish_config(guild_id INTEGER PRIMARY KEY, mute_at INTEGER DEFAULT 3, ban_at INTEGER DEFAULT 5);
+        CREATE TABLE IF NOT EXISTS polls(id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id INTEGER, channel_id INTEGER,
+            message_id INTEGER DEFAULT 0, question TEXT, options TEXT, votes TEXT DEFAULT '{}',
+            status TEXT DEFAULT 'active', creator INTEGER, ts TEXT);
         INSERT OR IGNORE INTO owner_settings(id) VALUES (1);
         """)
         for tbl, col, typ in (("users","pro_tag","TEXT"),("users","xp2","INTEGER DEFAULT 0"),("tickets","claimed_by","INTEGER")):
@@ -309,7 +311,7 @@ CATS = {"genel":("genel","Genel & Sistem"),"mod":("mod","Moderasyon & Koruma"),"
 "eco":("eco","Ekonomi"),"fun":("fun","Eğlence"),"give":("give","Çekiliş"),"pro":("pro","Pro"),"owner":("owner","Owner")}
 CAT_DESC = {"genel":"Rank, profil, avatar, snipe, AFK, oda ve genel araçlar","mod":"Ban, kick, unban, mute, uyarı, oto-ceza, koruma",
 "sys":"Başvuru, ticket, temp voice, oto-cevap, sayaç, log","eco":"Coin, günlük, çalışma, balık, maden, market",
-"fun":"Quiz, slot, aşk, oylama ve oyunlar","give":"Butonlu çekiliş, reroll ve sonuç paneli",
+"fun":"Quiz, slot, aşk, butonlu anket ve oyunlar","give":"Butonlu çekiliş, reroll ve sonuç paneli",
 "pro":"Pro üyelere özel oda, renk, tag, boost","owner":"Owner + Half Owner yönetim paneli"}
 def cat_count(b, k): return len([c for c in b.commands if getattr(c, "kategori", None) == k])
 def help_content(bot):
@@ -504,6 +506,69 @@ class GwJumpView(View):
         super().__init__(timeout=None)
         self.add_item(Button(label="Çekilişe Git", url=url, style=discord.ButtonStyle.link, emoji="🔗"))
 
+# ─────────────── 🗳️ BUTONLU OYLAMA (v3.5.1 — TEK OY, DEĞİŞTİRİLEMEZ) ───────────────
+def poll_content(p):
+    opts = json.loads(p["options"]); votes = json.loads(p["votes"])
+    total = sum(len(v) for v in votes.values())
+    L = [e("chart") + " **ANKET: " + p["question"] + "**", DIV]
+    if p["status"] != "active":
+        L.append(e("lock") + " **ANKET KAPANDI — KESİN SONUÇLAR**")
+    L.append("")
+    for i, op in enumerate(opts):
+        n = len(votes.get(str(i), []))
+        pct = (n / total * 100) if total else 0
+        L.append(e("arrow") + " **" + op + "** ─ `" + str(n) + "` oy  " + bar(pct, 10))
+    L += ["", e("dot") + " Toplam: **" + str(total) + "** oy • " +
+          (e("party") + " Katılan herkese teşekkürler!" if p["status"] != "active" else "Butonlara basarak oy ver! (**tek oy — değiştirilemez**)")]
+    return "\n".join(L)
+
+async def refresh_poll(client, p):
+    ch = client.get_channel(p["channel_id"])
+    if not ch: return
+    try:
+        msg = await ch.fetch_message(p["message_id"])
+        view = None if p["status"] != "active" else PollView(p["id"], json.loads(p["options"]))
+        await msg.edit(content=poll_content(p), view=view)
+    except Exception: pass
+
+class PollView(View):
+    def __init__(self, poll_id, options):
+        super().__init__(timeout=None)
+        self.poll_id = poll_id
+        for i, op in enumerate(options[:5]):
+            b = Button(label=op[:60], style=discord.ButtonStyle.primary, emoji=e("dot"),
+                       custom_id="poll_" + str(poll_id) + "_" + str(i), row=0)
+            b.callback = self.make_vote(i)
+            self.add_item(b)
+        c = Button(label="Anketi Kapat", style=discord.ButtonStyle.danger, emoji=e("lock"),
+                   custom_id="pollc_" + str(poll_id), row=1)
+        c.callback = self.cb_close
+        self.add_item(c)
+    def make_vote(self, i):
+        async def _vote(it):
+            p = db.one("SELECT * FROM polls WHERE id=?", (self.poll_id,))
+            if not p or p["status"] != "active":
+                return await it.response.send_message(ER("ANKET KAPALI", "Bu anket artık oy kabul etmiyor."), ephemeral=True)
+            votes = json.loads(p["votes"])
+            for lst in votes.values():
+                if str(it.user.id) in lst:
+                    return await it.response.send_message(WN("ZATEN OY VERDİN", "Oyun **değiştirilemez**!"), ephemeral=True)
+            votes.setdefault(str(i), []).append(str(it.user.id))
+            db.q("UPDATE polls SET votes=? WHERE id=?", (json.dumps(votes), self.poll_id))
+            await it.response.send_message(OK("OYUN KAYDEDİLDİ", e("arrow") + " **" + json.loads(p["options"])[i] + "**"), ephemeral=True)
+            await refresh_poll(it.client, db.one("SELECT * FROM polls WHERE id=?", (self.poll_id,)))
+        return _vote
+    async def cb_close(self, it):
+        p = db.one("SELECT * FROM polls WHERE id=?", (self.poll_id,))
+        if not p: return
+        if not (it.user.id == p["creator"] or (it.guild and it.guild.permissions_for(it.user).administrator)):
+            return await it.response.send_message(ER("YETKİ YOK", "Sadece anket sahibi veya yönetici kapatabilir."), ephemeral=True)
+        if p["status"] != "active":
+            return await it.response.send_message(WN("ZATEN KAPALI"), ephemeral=True)
+        db.q("UPDATE polls SET status='closed' WHERE id=?", (self.poll_id,))
+        await refresh_poll(it.client, db.one("SELECT * FROM polls WHERE id=?", (self.poll_id,)))
+        await it.response.send_message(OK("ANKET KAPATILDI", "Kesin sonuçlar mesajda."), ephemeral=True)
+
 class RoleButton(Button):
     def __init__(self, rid, label, cid, row):
         super().__init__(label=label[:78], style=discord.ButtonStyle.secondary, emoji="🎭", custom_id=cid, row=row)
@@ -666,7 +731,6 @@ class TVLimitModal(Modal, title="Oda Limiti"):
         except ValueError: n = 0
         await ch.edit(user_limit=n if n else None)
         await it.response.send_message(OK("LİMİT", str(n) if n else "Sınırsız"), ephemeral=True)
-
 class TVPanel(View):
     def __init__(self, ch_id):
         super().__init__(timeout=None)
@@ -745,6 +809,7 @@ class KatreBot(commands.Bot):
                 if roles: self.add_view(RoleMenuView(r["menu_id"], roles))
             for r in db.all("SELECT id FROM applications WHERE status='pending'"): self.add_view(AppReviewView(r["id"]))
             for r in db.all("SELECT channel_id FROM temp_channels"): self.add_view(TVPanel(r["channel_id"]))
+            for r in db.all("SELECT id, options FROM polls WHERE status='active'"): self.add_view(PollView(r["id"], json.loads(r["options"])))
             if not EMO_CACHE:
                 for g in self.guilds:
                     if auto_map_emojis(g): break
@@ -772,7 +837,7 @@ class KatreBot(commands.Bot):
         ms = [(discord.ActivityType.watching, "k!yardım | Katre Bot"), (discord.ActivityType.playing, str(len(self.guilds)) + " sunucuda"),
               (discord.ActivityType.listening, str(sum(g.member_count or 0 for g in self.guilds)) + " kullanıcıya"),
               (discord.ActivityType.competing, "k!quiz ile yarış"), (discord.ActivityType.watching, "Owner: " + on),
-              (discord.ActivityType.playing, "k!pro ayrıcalıkları"), (discord.ActivityType.listening, "k!tempvoice 🎤")]
+              (discord.ActivityType.playing, "k!pro ayrıcalıkları"), (discord.ActivityType.listening, "k!oylama 🗳️")]
         t, m = ms[self._si % len(ms)]; self._si += 1
         try: await self.change_presence(activity=discord.Activity(type=t, name=m))
         except Exception: pass
@@ -904,7 +969,6 @@ class KatreBot(commands.Bot):
         except Exception: traceback.print_exc()
         await self.process_commands(m)
     async def on_voice_state_update(self, member, before, after):
-        """🎤 TEMP VOICE: tetikleyiciye giren oda kurar, boşalan oda silinir"""
         try:
             guild = member.guild
             tv = db.one("SELECT * FROM tempvoice WHERE guild_id=?", (guild.id,))
@@ -1249,7 +1313,7 @@ async def botkontrol(ctx):
     await rp(ctx, head("gear", "BOT KONTROL #" + ctx.channel.name) + "\n" + "\n".join((e("check") if ok else e("cross")) + " " + n for n, ok in cs))
 
 # ═══════════════════════════════════════════════════════════════════════════
-# 🛡️ MOD (+ MUTE + OTO CEZA)
+# 🛡️ MOD
 # ═══════════════════════════════════════════════════════════════════════════
 @kategori("mod")
 @bot.command(name="yasakla", aliases=["ban"], help="<@üye> [sebep]")
@@ -1312,13 +1376,13 @@ async def ceza_sistemi(ctx, i: str = "bilgi", a: int = 3, b: int = 5):
     i = i.lower()
     if i in ("ayarla","aç"):
         db.q("INSERT OR REPLACE INTO punish_config(guild_id,mute_at,ban_at) VALUES(?,?,?)", (ctx.guild.id, a, b))
-        await rp(ctx, OK("CEZA SİSTEMİ", "**" + str(a) + " uyarı → 1 saat mute**\n**" + str(b) + " uyarı → 1 gün ban**"))
+        await rp(ctx, OK("CEZA SİSTEMİ", "**" + str(a) + " uyarı → 1 saat mute**\n**" + str(b) + " uyarı → ban**"))
     elif i in ("kapat","off"):
         db.q("DELETE FROM punish_config WHERE guild_id=?", (ctx.guild.id,))
         await rp(ctx, OK("CEZA SİSTEMİ", "Kapatıldı."))
     else:
         c = db.one("SELECT * FROM punish_config WHERE guild_id=?", (ctx.guild.id,))
-        await rp(ctx, head("shield", "CEZA SİSTEMİ") + "\n" + (str(c["mute_at"]) + " uyarı → 1s mute • " + str(c["ban_at"]) + " uyarı → 1g ban" if c else "Kapalı. Kur: `k!ceza-sistemi ayarla 3 5`"))
+        await rp(ctx, head("shield", "CEZA SİSTEMİ") + "\n" + (str(c["mute_at"]) + " uyarı → 1s mute • " + str(c["ban_at"]) + " uyarı → ban" if c else "Kapalı. Kur: `k!ceza-sistemi ayarla 3 5`"))
 @kategori("mod")
 @bot.command(name="ceza-geçmişi", aliases=["cezalar","sicil"], help="[<@üye>] — Ceza geçmişi")
 @commands.has_permissions(manage_messages=True)
@@ -1391,7 +1455,7 @@ async def uyar(ctx, u: discord.Member, *, s="Belirtilmedi"):
             try:
                 await u.ban(reason="Oto ceza: " + str(w) + " uyarı")
                 punish_log(ctx.guild.id, u.id, "AUTO-BAN", str(w) + " uyarı", ctx.bot.user.id)
-                extra = "\n" + e("hammer") + " **" + str(w) + " uyarı → OTOMATİK BAN (1 gün yerine kalıcı)**"
+                extra = "\n" + e("hammer") + " **" + str(w) + " uyarı → OTOMATİK BAN**"
             except Exception: pass
         elif w == cfg["mute_at"]:
             try:
@@ -1585,7 +1649,7 @@ async def kurulum(ctx):
     except Exception as ex: await rp(ctx, ER("HATA", "```\n" + str(ex)[:300] + "\n```"))
 
 # ═══════════════════════════════════════════════════════════════════════════
-# 📋 SİSTEMLER (+ TEMP VOICE KURULUM)
+# 📋 SİSTEMLER
 # ═══════════════════════════════════════════════════════════════════════════
 @kategori("sys")
 @bot.command(name="tempvoice", aliases=["geçicises"], help="[kur|#seskanalı|kapat] — Temp voice sistemi")
@@ -1823,7 +1887,7 @@ async def aşk(ctx, u: discord.Member):
 @kategori("fun")
 @bot.command(name="slot", help="Slot")
 async def slot(ctx):
-    s = ["🍒","","🍇","💎","7️⃣","🔔"]; r = [random.choice(s) for _ in range(3)]
+    s = ["🍒","🍋","🍇","💎","7️⃣",""]; r = [random.choice(s) for _ in range(3)]
     w = len(set(r)) == 1
     await rp(ctx, head("slot", "SLOT") + "\n┃ " + " ┃ ".join(r) + " ┃\n" + ("**JACKPOT!**" if w else "Olmadı..."))
 @kategori("fun")
@@ -1832,6 +1896,19 @@ async def seç(ctx, *, s):
     o = s.split()
     if len(o) < 2: return await rp(ctx, ER("GEÇERSİZ", "2+ seçenek"))
     await rp(ctx, e("target") + " Seçimim: **" + random.choice(o) + "**")
+@kategori("fun")
+@bot.command(name="oylama", aliases=["anket"], help="<soru> [| A | B | C...] — Butonlu anket (tek oy)")
+async def oylama(ctx, *, s):
+    parts = [x.strip() for x in s.split("|")]
+    question = parts[0][:200]
+    opts = [x for x in parts[1:6] if x] if len(parts) > 1 else ["Evet", "Hayır", "Çekimser"]
+    if len(opts) < 2: return await rp(ctx, ER("GEÇERSİZ", "En az 2 seçenek: `k!oylama Soru | A | B`"))
+    cur = db.q("INSERT INTO polls(guild_id,channel_id,message_id,question,options,votes,status,creator,ts) VALUES(?,?,0,?,?,'{}','active',?,?)",
+               (ctx.guild.id, ctx.channel.id, question, json.dumps(opts), ctx.author.id, datetime.datetime.now().isoformat()))
+    pid = cur.lastrowid
+    p = db.one("SELECT * FROM polls WHERE id=?", (pid,))
+    msg = await rp(ctx, poll_content(p), PollView(pid, opts))
+    if msg: db.q("UPDATE polls SET message_id=? WHERE id=?", (msg.id, pid))
 @kategori("fun")
 @bot.command(name="ppboyu", aliases=["pp"], help="Efsanevi ölçüm")
 @commands.cooldown(1, 5, commands.BucketType.user)
@@ -1848,11 +1925,6 @@ async def burç(ctx, *, b):
     k = b.lower().strip()
     if k not in B: return await rp(ctx, ER("GEÇERSİZ BURÇ", "`" + "`, `".join(B.keys()) + "`"))
     await rp(ctx, head("star", k.upper() + " BURCU") + "\n" + B[k] + "\n" + e("spark") + " Şanslı sayın: **" + str(random.randint(1, 99)) + "**")
-@kategori("fun")
-@bot.command(name="oylama", aliases=["anket"], help="<soru>")
-async def oylama(ctx, *, s):
-    m = await rp(ctx, head("chart", "OYLAMA") + "\n### " + s[:200] + "\n\n👍 Evet • 👎 Hayır • 🤷 Çekimser")
-    for r in ("👍","","🤷"): await m.add_reaction(r)
 @kategori("fun")
 @bot.command(name="quiz", aliases=["bilgi"], help="Yarışma +75 coin")
 @commands.cooldown(1, 10, commands.BucketType.user)
