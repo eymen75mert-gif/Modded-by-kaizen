@@ -344,24 +344,13 @@ def help_content(bot):
         L += [e("arrow") + " " + e(k) + " **" + CATS[k][1] + "**  `" + str(cat_count(bot, k)) + "` komut", CAT_DESC[k], ""]
     L.append(e("link") + " Destek: " + SUPPORT_URL)
     return "\n".join(L)
-def cat_content(bot, key):
-    cmds = sorted([c for c in bot.commands if getattr(c, "kategori", None) == key], key=lambda x: x.name)
-    base = [e(key) + " **" + CATS[key][1].upper() + "** (" + str(len(cmds)) + " komut)", DIV, ""]
-    body = "\n".join(base + [e("arrow") + " `k!" + c.name + "` ─ " + (c.help or "") for c in cmds])
-    if len(body) > 1900:  # ✅ 2000 limitine takılmasın → kompakt liste
-        body = "\n".join(base + ["`k!" + c.name + "`" for c in cmds])
-        body += "\n\n" + e("info") + " Detay için: `k!komutbilgi <komut>`"
-    body += "\n\n" + e("info") + " Ana menü için butonu kullan."
-    return body
-
-@kategori("genel")
-@bot.command(name="komutbilgi", aliases=["cmd"], help="<komut adı> — Komut detayı")
-async def komutbilgi(ctx, *, name: str):
-    c = bot.get_command(name.lower().replace("k!", ""))
-    if not c: return await rp(ctx, ER("BULUNAMADI", "Örnek: `k!komutbilgi mute`"))
-    await rp(ctx, head("info", "k!" + c.name) + "\n" + (c.help or "—") +
-             "\n" + e("dot") + " Kullanım: `k!" + c.name + (" " + c.signature if c.signature else "") + "`")
-             # ← 352. satır
+def cat_content(bot, key):          # ← 347. satır
+    L = [e(key) + " **" + CATS[key][1].upper() + "**", DIV, ""]
+    for c in sorted([c for c in bot.commands if getattr(c, "kategori", None) == key], key=lambda x: x.name):
+        L.append(e("arrow") + " `k!" + c.name + "` ─ " + (c.help or ""))
+    L += ["", e("info") + " Ana menü için butonu kullan."]
+    return "\n".join(L)              # ← 352. satır
+ 
 
 
 # ═══════════════════════════════════════════════════════════════════════════
