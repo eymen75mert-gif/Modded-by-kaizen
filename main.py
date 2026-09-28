@@ -1,5 +1,5 @@
 # ═══════════════════════════════════════════════════════════════════════════
-#  💧 KATRE BOT v3.5.1 — TEK DOSYA • BUTONLU OYLAMA • TEMP VOICE • MUTE
+#  💧 KATRE BOT v3.5.2 — TEK DOSYA • OYLAMA FIX • GÜZEL AFK • BULUT AYARLAR
 #  ─ ENV: BOT_TOKEN, OWNER_ID, SUPPORT_URL, BACKUP_CHANNEL_ID
 #  ─ pip install -U discord.py
 # ═══════════════════════════════════════════════════════════════════════════
@@ -18,12 +18,13 @@ BACKUP_CH   = int(os.getenv("BACKUP_CHANNEL_ID", "0"))
 MARKER      = "#KATRE_YEDEK"
 DIV = "──────────────────────────────"
 
-BOT_VERSION = "3.5.1"
+BOT_VERSION = "3.5.2"
 CHANGELOG = {
- "3.5.1": ["🗳️ Oylama artık BUTONLU: tek oy, değiştirilemez, nitro emojili",
-           "🗳️ Özel seçenek: k!oylama Soru | A | B | C (max 5)",
-           "🔒 Anketi sadece sahibi veya yönetici kapatır"],
- "3.5": ["🎤 Temp Voice sistemi", "🔇 Süreli mute + oto ceza zinciri"],
+ "3.5.2": ["🗳️ Oylama düzeltildi (hata olursa sebebi görünür, butonlar garantili)",
+           "😴 AFK güzelleştirildi: sebep paneli, mention sayacı, dönüş özeti",
+           "☁️ AYARLAR BULUTTA: hoşgeldin, ceza sistemi, koruma, otocevap, sayaç,",
+           "    seviye rol, log, badword, tempvoice → restart/redeploy sonrası aynen kalır"],
+ "3.5.1": ["🗳️ Butonlu oylama (tek oy, değiştirilemez)"],
 }
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -57,7 +58,7 @@ class DB:
         CREATE TABLE IF NOT EXISTS badwords(guild_id INTEGER, word TEXT, PRIMARY KEY(guild_id, word));
         CREATE TABLE IF NOT EXISTS pro_logs(id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER,
             action TEXT, days INTEGER DEFAULT 0, by_id INTEGER, ts TEXT);
-        CREATE TABLE IF NOT EXISTS afk(user_id INTEGER PRIMARY KEY, reason TEXT, since TEXT);
+        CREATE TABLE IF NOT EXISTS afk(user_id INTEGER PRIMARY KEY, reason TEXT, since TEXT, mentions INTEGER DEFAULT 0);
         CREATE TABLE IF NOT EXISTS snipe(channel_id INTEGER PRIMARY KEY, author_id INTEGER, content TEXT, attachment TEXT, ts TEXT);
         CREATE TABLE IF NOT EXISTS marriages(id INTEGER PRIMARY KEY AUTOINCREMENT, user1 INTEGER, user2 INTEGER, since TEXT);
         CREATE TABLE IF NOT EXISTS applications(id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id INTEGER, user_id INTEGER,
@@ -78,7 +79,7 @@ class DB:
             status TEXT DEFAULT 'active', creator INTEGER, ts TEXT);
         INSERT OR IGNORE INTO owner_settings(id) VALUES (1);
         """)
-        for tbl, col, typ in (("users","pro_tag","TEXT"),("users","xp2","INTEGER DEFAULT 0"),("tickets","claimed_by","INTEGER")):
+        for tbl, col, typ in (("users","pro_tag","TEXT"),("users","xp2","INTEGER DEFAULT 0"),("tickets","claimed_by","INTEGER"),("afk","mentions","INTEGER DEFAULT 0")):
             try: c.execute("ALTER TABLE " + tbl + " ADD COLUMN " + col + " " + typ)
             except sqlite3.OperationalError: pass
         self.conn.commit()
@@ -171,12 +172,16 @@ def auto_map_emojis(guild):
     return mapped
 
 # ═══════════════════════════════════════════════════════════════════════════
-# ☁️ BULUT YEDEK
+# ☁️ BULUT YEDEK (EMOJİ + PRO + ✅ AYARLAR)
 # ═══════════════════════════════════════════════════════════════════════════
-_HASH = {"emoji": None, "pro": None}
+_HASH = {"emoji": None, "pro": None, "set": None}
+SET_TABLES = ["servers","punish_config","protections","app_settings","counters",
+              "level_roles","guild_logs","auto_replies","badwords","tempvoice"]
 def pro_snapshot():
     return {"pros": db.all("SELECT user_id,pro_expiry,pro_color,pro_tag,xp2 FROM users WHERE pro=1"),
             "logs": db.all("SELECT user_id,action,days,by_id,ts FROM pro_logs ORDER BY id")}
+def settings_snapshot():
+    return {t: db.all("SELECT * FROM " + t) for t in SET_TABLES}
 def emoji_restore(data):
     for k, v in data.items():
         db.q("INSERT OR REPLACE INTO emojis(slot,emoji) VALUES(?,?)", (k, v))
@@ -192,11 +197,22 @@ def pro_restore(data):
             db.q("INSERT INTO pro_logs(user_id,action,days,by_id,ts) VALUES(?,?,?,?,?)",
                  (l["user_id"], l["action"], l["days"], l["by_id"], l["ts"]))
     return n
+def settings_restore(data):
+    n = 0
+    for t, rows in data.items():
+        if t not in SET_TABLES: continue
+        for r in rows:
+            cols = ", ".join(r.keys()); ph = ", ".join("?" * len(r))
+            try:
+                db.q("INSERT OR REPLACE INTO " + t + " (" + cols + ") VALUES (" + ph + ")", tuple(r.values()))
+                n += 1
+            except Exception: pass
+    return n
 async def push_backup(bot, kind, data):
     if not BACKUP_CH: return False
     try:
         ch = bot.get_channel(BACKUP_CH) or await bot.fetch_channel(BACKUP_CH)
-        raw = json.dumps(data, separators=(",", ":"))
+        raw = json.dumps(data, separators=(",", ":"), default=str)
         gen = str(int(datetime.datetime.now().timestamp()))
         chunks = [raw[i:i+1800] for i in range(0, len(raw), 1800)] or ["{}"]
         async for m in ch.history(limit=400):
@@ -258,6 +274,10 @@ def fancy(t):
         elif 48 <= c <= 57: o.append(chr(c - 48 + 0xFF10))
         else: o.append(ch)
     return "".join(o)
+def sure_txt(dk):
+    if dk >= 1440: return str(dk // 1440) + " gün " + str((dk % 1440) // 60) + " saat"
+    if dk >= 60: return str(dk // 60) + " saat " + str(dk % 60) + " dakika"
+    return str(dk) + " dakika"
 
 async def check_update(bot):
     try:
@@ -506,7 +526,7 @@ class GwJumpView(View):
         super().__init__(timeout=None)
         self.add_item(Button(label="Çekilişe Git", url=url, style=discord.ButtonStyle.link, emoji="🔗"))
 
-# ─────────────── 🗳️ BUTONLU OYLAMA (v3.5.1 — TEK OY, DEĞİŞTİRİLEMEZ) ───────────────
+# ─────────────── 🗳️ BUTONLU OYLAMA (v3.5.2 — SAĞLAMLAŞTIRILDI) ───────────────
 def poll_content(p):
     opts = json.loads(p["options"]); votes = json.loads(p["votes"])
     total = sum(len(v) for v in votes.values())
@@ -546,17 +566,22 @@ class PollView(View):
         self.add_item(c)
     def make_vote(self, i):
         async def _vote(it):
-            p = db.one("SELECT * FROM polls WHERE id=?", (self.poll_id,))
-            if not p or p["status"] != "active":
-                return await it.response.send_message(ER("ANKET KAPALI", "Bu anket artık oy kabul etmiyor."), ephemeral=True)
-            votes = json.loads(p["votes"])
-            for lst in votes.values():
-                if str(it.user.id) in lst:
-                    return await it.response.send_message(WN("ZATEN OY VERDİN", "Oyun **değiştirilemez**!"), ephemeral=True)
-            votes.setdefault(str(i), []).append(str(it.user.id))
-            db.q("UPDATE polls SET votes=? WHERE id=?", (json.dumps(votes), self.poll_id))
-            await it.response.send_message(OK("OYUN KAYDEDİLDİ", e("arrow") + " **" + json.loads(p["options"])[i] + "**"), ephemeral=True)
-            await refresh_poll(it.client, db.one("SELECT * FROM polls WHERE id=?", (self.poll_id,)))
+            try:
+                p = db.one("SELECT * FROM polls WHERE id=?", (self.poll_id,))
+                if not p or p["status"] != "active":
+                    return await it.response.send_message(ER("ANKET KAPALI", "Bu anket artık oy kabul etmiyor."), ephemeral=True)
+                votes = json.loads(p["votes"])
+                for lst in votes.values():
+                    if str(it.user.id) in lst:
+                        return await it.response.send_message(WN("ZATEN OY VERDİN", "Oyun **değiştirilemez**!"), ephemeral=True)
+                votes.setdefault(str(i), []).append(str(it.user.id))
+                db.q("UPDATE polls SET votes=? WHERE id=?", (json.dumps(votes), self.poll_id))
+                await it.response.send_message(OK("OYUN KAYDEDİLDİ", e("arrow") + " **" + json.loads(p["options"])[i] + "**"), ephemeral=True)
+                await refresh_poll(it.client, db.one("SELECT * FROM polls WHERE id=?", (self.poll_id,)))
+            except Exception as ex:
+                traceback.print_exc()
+                try: await it.response.send_message(ER("OY HATASI", str(ex)[:200]), ephemeral=True)
+                except Exception: pass
         return _vote
     async def cb_close(self, it):
         p = db.one("SELECT * FROM polls WHERE id=?", (self.poll_id,))
@@ -822,9 +847,13 @@ class KatreBot(commands.Bot):
                 if not db.all("SELECT 1 FROM users WHERE pro=1") and not db.all("SELECT 1 FROM pro_logs"):
                     d = await pull_backup(self, "pro")
                     if d: print("☁️ Yedekten " + str(pro_restore(d)) + " PRO + log geri yüklendi!")
+                if not db.all("SELECT 1 FROM servers"):
+                    d = await pull_backup(self, "settings")
+                    if d: print("☁️ Yedekten " + str(settings_restore(d)) + " AYAR kaydı geri yüklendi!")
             except Exception: traceback.print_exc()
             _HASH["emoji"] = json.dumps(EMO_CACHE, sort_keys=True)
-            _HASH["pro"] = json.dumps(pro_snapshot(), sort_keys=True)
+            _HASH["pro"] = json.dumps(pro_snapshot(), sort_keys=True, default=str)
+            _HASH["set"] = json.dumps(settings_snapshot(), sort_keys=True, default=str)
         refresh_emojis()
         await check_update(self)
         print("💧 KATRE v" + BOT_VERSION + " | " + str(self.user) + " | " + str(len(self.guilds)) + " sunucu | " +
@@ -854,13 +883,18 @@ class KatreBot(commands.Bot):
     @tasks.loop(minutes=1)
     async def backup_loop(self):
         if not BACKUP_CH: return
-        eh = json.dumps(EMO_CACHE, sort_keys=True); ph = json.dumps(pro_snapshot(), sort_keys=True)
+        eh = json.dumps(EMO_CACHE, sort_keys=True)
+        ph = json.dumps(pro_snapshot(), sort_keys=True, default=str)
+        sh = json.dumps(settings_snapshot(), sort_keys=True, default=str)
         if _HASH["emoji"] is None: _HASH["emoji"] = eh
         if _HASH["pro"] is None: _HASH["pro"] = ph
+        if _HASH["set"] is None: _HASH["set"] = sh
         if eh != _HASH["emoji"]:
             _HASH["emoji"] = eh; await push_backup(self, "emoji", EMO_CACHE)
         if ph != _HASH["pro"]:
             _HASH["pro"] = ph; await push_backup(self, "pro", pro_snapshot())
+        if sh != _HASH["set"]:
+            _HASH["set"] = sh; await push_backup(self, "settings", settings_snapshot())
     async def punish(self, m, mn, r):
         try: await m.timeout(datetime.timedelta(minutes=mn), reason=r); return True
         except Exception: return False
@@ -923,16 +957,28 @@ class KatreBot(commands.Bot):
                 return
             if db.one("SELECT 1 FROM blacklist WHERE user_id=?", (m.author.id,)): return
         except Exception: pass
+        # 😴 AFK (v3.5.2 güzelleştirilmiş)
         try:
             a = db.one("SELECT * FROM afk WHERE user_id=?", (m.author.id,))
             if a:
+                dk = int((datetime.datetime.now() - datetime.datetime.fromisoformat(a["since"])).total_seconds() // 60)
                 db.q("DELETE FROM afk WHERE user_id=?", (m.author.id,))
-                await m.channel.send(e("wave") + " **" + m.author.display_name + "** tekrar aramızda!")
+                msg = await m.channel.send(head("wave", "TEKRAR ARAMIZDA") + "\n" + m.author.mention + " AFK'dan döndü!\n" +
+                    e("time") + " Uzak kaldığı süre: **" + sure_txt(dk) + "**\n" +
+                    e("target") + " Mentionlenme: **" + str(a["mentions"] or 0) + "** kez\n" +
+                    e("spark") + " Tekrar hoş geldin!")
+                try: await msg.delete(delay=20)
+                except Exception: pass
             if m.guild:
                 for mm in m.mentions:
                     a = db.one("SELECT * FROM afk WHERE user_id=?", (mm.id,))
                     if a:
-                        await m.channel.send(e("sleep") + " " + mm.mention + " AFK: **" + (a["reason"] or "—") + "**"); break
+                        db.q("UPDATE afk SET mentions=mentions+1 WHERE user_id=?", (mm.id,))
+                        await m.channel.send(head("sleep", mm.display_name + " ŞU AN AFK") + "\n" +
+                            e("arrow") + " Sebep: **" + (a["reason"] or "Belirtilmedi") + "**\n" +
+                            e("time") + " AFK olalı: <t:" + str(int(datetime.datetime.fromisoformat(a["since"]).timestamp())) + ":R>\n" +
+                            e("target") + " Toplam mention: **" + str((a["mentions"] or 0) + 1) + "**")
+                        break
         except Exception: pass
         await self.protections(m)
         try:
@@ -1203,7 +1249,7 @@ async def sıralama(ctx):
     rs = db.all("SELECT * FROM users ORDER BY level DESC, xp DESC LIMIT 10")
     if not rs: return await rp(ctx, e("chart") + " Henüz veri yok.")
     L = [head("star", "SUNUCU SIRALAMASI")]
-    md = ["🥇","","🥉"]
+    md = ["🥇","🥈","🥉"]
     for i, r in enumerate(rs):
         L.append((md[i] if i < 3 else "**" + str(i+1) + ".**") + " <@" + str(r["user_id"]) + ">" +
                  (" " + e("pro") if r["pro"] else "") + " ─ Lv.**" + str(r["level"]) + "** • `" + str(r["xp"]) + " XP`")
@@ -1213,11 +1259,13 @@ async def sıralama(ctx):
 async def profil(ctx, u: discord.Member = None):
     u = u or ctx.author; ensure_user(u.id, str(u))
     d = db.one("SELECT * FROM users WHERE user_id=?", (u.id,))
+    a = db.one("SELECT * FROM afk WHERE user_id=?", (u.id,))
     await rp(ctx, head("logo", u.display_name.upper() + " PROFİL") + "\n" + KV([
         (e("dot")+" ID", "`"+str(u.id)+"`"), (e("time")+" Hesap", "<t:"+str(int(u.created_at.timestamp()))+":R>"),
         (e("wave")+" Katılım", "<t:"+str(int(u.joined_at.timestamp()))+":R>" if u.joined_at else "—"),
         (e("chartup")+" Seviye", d["level"]), (e("coin")+" Coin", d["coins"]), (e("star")+" Rep", d["rep"]),
-        (e("pro")+" Pro", "✅" if d["pro"] else "❌")]))
+        (e("pro")+" Pro", "✅" if d["pro"] else "❌"),
+        (e("sleep")+" AFK", ("✅ (" + (a["reason"] or "sebep yok")[:30] + ")") if a else "❌")]))
 @kategori("genel")
 @bot.command(name="sunucubilgi", aliases=["serverinfo"], help="Sunucu bilgisi")
 async def sunucubilgi(ctx):
@@ -1250,10 +1298,20 @@ async def snipe(ctx):
     await rp(ctx, head("cam", "SNIPE") + "\n" + KV([(e("dot")+" Kullanıcı", "<@"+str(s["author_id"])+">"), (e("time")+" Tarih", s["ts"][:16].replace("T"," "))]) +
              "\n> " + ((s["content"] or "_ek_")[:800]) + (("\n" + s["attachment"]) if s["attachment"] else ""))
 @kategori("genel")
-@bot.command(name="afk", help="[sebep] — AFK")
-async def afk(ctx, *, s="Belirtilmedi"):
-    db.q("INSERT OR REPLACE INTO afk(user_id,reason,since) VALUES(?,?,?)", (ctx.author.id, s[:100], datetime.datetime.now().isoformat()))
-    await rp(ctx, head("sleep", "AFK") + "\n" + s[:100])
+@bot.command(name="afk", help="[sebep] — AFK ol (tekrar yazınca dönersin)")
+async def afk(ctx, *, s=None):
+    cur = db.one("SELECT * FROM afk WHERE user_id=?", (ctx.author.id,))
+    if cur and not s:
+        db.q("DELETE FROM afk WHERE user_id=?", (ctx.author.id,))
+        return await rp(ctx, OK("AFK KAPATILDI", "Artık AFK değilsin. Tekrar aramıza hoş geldin!"))
+    reason = (s or "Belirtilmedi")[:100]
+    db.q("INSERT OR REPLACE INTO afk(user_id,reason,since,mentions) VALUES(?,?,?,0)",
+         (ctx.author.id, reason, datetime.datetime.now().isoformat()))
+    await rp(ctx, head("sleep", "AFK MODU AÇIK") + "\n" +
+             e("arrow") + " Sebep: **" + reason + "**\n" +
+             e("time") + " Başlangıç: <t:" + str(int(datetime.datetime.now().timestamp())) + ":F>\n" +
+             e("info") + " Bir mesaj yazdığında otomatik olarak AFK'dan çıkarsın.\n" +
+             e("target") + " Seni mentionleyenlere AFK olduğunu söyleyeceğim.")
 @kategori("genel")
 @bot.command(name="rep", help="<@üye> — İtibar (12s)")
 @commands.cooldown(1, 43200, commands.BucketType.user)
@@ -1376,7 +1434,7 @@ async def ceza_sistemi(ctx, i: str = "bilgi", a: int = 3, b: int = 5):
     i = i.lower()
     if i in ("ayarla","aç"):
         db.q("INSERT OR REPLACE INTO punish_config(guild_id,mute_at,ban_at) VALUES(?,?,?)", (ctx.guild.id, a, b))
-        await rp(ctx, OK("CEZA SİSTEMİ", "**" + str(a) + " uyarı → 1 saat mute**\n**" + str(b) + " uyarı → ban**"))
+        await rp(ctx, OK("CEZA SİSTEMİ", "**" + str(a) + " uyarı → 1 saat mute**\n**" + str(b) + " uyarı → ban**\n☁️ Bu ayar restart sonrası da kalır."))
     elif i in ("kapat","off"):
         db.q("DELETE FROM punish_config WHERE guild_id=?", (ctx.guild.id,))
         await rp(ctx, OK("CEZA SİSTEMİ", "Kapatıldı."))
@@ -1549,7 +1607,7 @@ async def otorol(ctx, *, arg):
         return await rp(ctx, OK("OTOROL", "Kapatıldı."))
     role = await commands.RoleConverter().convert(ctx, arg)
     db.q("UPDATE servers SET auto_role=? WHERE guild_id=?", (role.id, ctx.guild.id))
-    await rp(ctx, OK("OTOROL", "Yeni üyelere " + role.mention + " verilecek."))
+    await rp(ctx, OK("OTOROL", "Yeni üyelere " + role.mention + " verilecek.\n☁️ Restart sonrası da aktif kalır."))
 @kategori("mod")
 @bot.command(name="hoşgeldin", aliases=["hosgeldin"], help="<#kanal|kapat>")
 @commands.has_permissions(administrator=True)
@@ -1559,7 +1617,7 @@ async def hoşgeldin(ctx, ch: discord.TextChannel = None):
         db.q("UPDATE servers SET welcome_ch=NULL WHERE guild_id=?", (ctx.guild.id,))
         return await rp(ctx, OK("HOŞGELDİN", "Kapatıldı."))
     db.q("UPDATE servers SET welcome_ch=? WHERE guild_id=?", (ch.id, ctx.guild.id))
-    await rp(ctx, OK("HOŞGELDİN", "Yeni üyeler " + ch.mention + " kanalında karşılanacak."))
+    await rp(ctx, OK("HOŞGELDİN", "Yeni üyeler " + ch.mention + " kanalında karşılanacak.\n☁️ Restart sonrası da aktif kalır."))
 @kategori("mod")
 @bot.command(name="butonrol", aliases=["rolmenü"], help="<@rol...> — Rol menüsü")
 @commands.has_permissions(administrator=True)
@@ -1877,7 +1935,7 @@ async def yazıtura(ctx): await rp(ctx, e("dice") + " Sonuç: **" + random.choic
 @bot.command(name="zar", help="Zar")
 async def zar(ctx):
     r = random.randint(1, 6)
-    await rp(ctx, e("dice") + " Zar: **" + str(r) + "** " + ["⚀","","⚂","","⚄",""][r-1])
+    await rp(ctx, e("dice") + " Zar: **" + str(r) + "** " + ["⚀","","⚂","⚃","⚄","⚅"][r-1])
 @kategori("fun")
 @bot.command(name="aşk", aliases=["ask","love"], help="<@üye> aşk ölçer")
 async def aşk(ctx, u: discord.Member):
@@ -1887,7 +1945,7 @@ async def aşk(ctx, u: discord.Member):
 @kategori("fun")
 @bot.command(name="slot", help="Slot")
 async def slot(ctx):
-    s = ["🍒","🍋","🍇","💎","7️⃣",""]; r = [random.choice(s) for _ in range(3)]
+    s = ["🍒","","🍇","💎","7️⃣","🔔"]; r = [random.choice(s) for _ in range(3)]
     w = len(set(r)) == 1
     await rp(ctx, head("slot", "SLOT") + "\n┃ " + " ┃ ".join(r) + " ┃\n" + ("**JACKPOT!**" if w else "Olmadı..."))
 @kategori("fun")
@@ -1898,17 +1956,25 @@ async def seç(ctx, *, s):
     await rp(ctx, e("target") + " Seçimim: **" + random.choice(o) + "**")
 @kategori("fun")
 @bot.command(name="oylama", aliases=["anket"], help="<soru> [| A | B | C...] — Butonlu anket (tek oy)")
+@commands.cooldown(1, 5, commands.BucketType.user)
 async def oylama(ctx, *, s):
-    parts = [x.strip() for x in s.split("|")]
-    question = parts[0][:200]
-    opts = [x for x in parts[1:6] if x] if len(parts) > 1 else ["Evet", "Hayır", "Çekimser"]
-    if len(opts) < 2: return await rp(ctx, ER("GEÇERSİZ", "En az 2 seçenek: `k!oylama Soru | A | B`"))
-    cur = db.q("INSERT INTO polls(guild_id,channel_id,message_id,question,options,votes,status,creator,ts) VALUES(?,?,0,?,?,'{}','active',?,?)",
-               (ctx.guild.id, ctx.channel.id, question, json.dumps(opts), ctx.author.id, datetime.datetime.now().isoformat()))
-    pid = cur.lastrowid
-    p = db.one("SELECT * FROM polls WHERE id=?", (pid,))
-    msg = await rp(ctx, poll_content(p), PollView(pid, opts))
-    if msg: db.q("UPDATE polls SET message_id=? WHERE id=?", (msg.id, pid))
+    try:
+        parts = [x.strip() for x in s.split("|")]
+        question = parts[0][:200] or "Anket"
+        opts = [x[:60] for x in parts[1:6] if x] if len(parts) > 1 else ["Evet", "Hayır", "Çekimser"]
+        if len(opts) < 2:
+            return await rp(ctx, ER("GEÇERSİZ", "En az 2 seçenek gir:\n`k!oylama Soru | A | B`"))
+        cur = db.q("INSERT INTO polls(guild_id,channel_id,message_id,question,options,votes,status,creator,ts) VALUES(?,?,0,?,?,'{}','active',?,?)",
+                   (ctx.guild.id, ctx.channel.id, question, json.dumps(opts, ensure_ascii=False), ctx.author.id, datetime.datetime.now().isoformat()))
+        pid = cur.lastrowid
+        p = db.one("SELECT * FROM polls WHERE id=?", (pid,))
+        view = PollView(pid, opts)
+        msg = await ctx.send(poll_content(p), view=view)
+        db.q("UPDATE polls SET message_id=? WHERE id=?", (msg.id, pid))
+        bot.add_view(view)
+    except Exception as ex:
+        traceback.print_exc()
+        await rp(ctx, ER("ANKET HATASI", "```\n" + str(ex)[:300] + "\n```"))
 @kategori("fun")
 @bot.command(name="ppboyu", aliases=["pp"], help="Efsanevi ölçüm")
 @commands.cooldown(1, 5, commands.BucketType.user)
@@ -2134,19 +2200,23 @@ async def bakım(ctx, mod: str = None):
 @bot.command(name="restart", aliases=["yenidenbaşlat","rb"], help="Botu yeniden başlatır")
 @is_owner()
 async def restart(ctx):
-    await rp(ctx, OK("RESTART", "Bot yeniden başlatılıyor... (eski butonlar korunur)"))
+    await rp(ctx, OK("RESTART", "Bot yeniden başlatılıyor... (butonlar ve ayarlar korunur)"))
     await asyncio.sleep(1)
     os.execv(sys.executable, [sys.executable] + sys.argv)
 @kategori("owner")
-@bot.command(name="yedek", help="<durum/kaydet/yükle> [emoji/pro] — Bulut yedek")
+@bot.command(name="yedek", help="<durum/kaydet/yükle> [emoji/pro/settings] — Bulut yedek")
 @is_owner()
 async def yedek(ctx, i: str = "durum", hedef: str = None):
     if not BACKUP_CH: return await rp(ctx, ER("KANAL YOK", "Railway Variables → `BACKUP_CHANNEL_ID` ekle."))
     i = i.lower()
     if i == "kaydet":
-        await push_backup(bot, "emoji", EMO_CACHE); await push_backup(bot, "pro", pro_snapshot())
-        _HASH["emoji"] = json.dumps(EMO_CACHE, sort_keys=True); _HASH["pro"] = json.dumps(pro_snapshot(), sort_keys=True)
-        await rp(ctx, OK("YEDEKLENDİ", "Emoji + Pro verisi bulut kanalına yazıldı."))
+        await push_backup(bot, "emoji", EMO_CACHE)
+        await push_backup(bot, "pro", pro_snapshot())
+        await push_backup(bot, "settings", settings_snapshot())
+        _HASH["emoji"] = json.dumps(EMO_CACHE, sort_keys=True)
+        _HASH["pro"] = json.dumps(pro_snapshot(), sort_keys=True, default=str)
+        _HASH["set"] = json.dumps(settings_snapshot(), sort_keys=True, default=str)
+        await rp(ctx, OK("YEDEKLENDİ", "Emoji + Pro + **Ayarlar** bulut kanalına yazıldı."))
     elif i == "yükle":
         h = (hedef or "hepsi").lower(); msg = []
         if h in ("emoji","hepsi"):
@@ -2155,13 +2225,20 @@ async def yedek(ctx, i: str = "durum", hedef: str = None):
         if h in ("pro","hepsi"):
             d = await pull_backup(bot, "pro")
             if d: msg.append("pro: " + str(pro_restore(d)))
-        _HASH["emoji"] = json.dumps(EMO_CACHE, sort_keys=True); _HASH["pro"] = json.dumps(pro_snapshot(), sort_keys=True)
+        if h in ("settings","ayarlar","hepsi"):
+            d = await pull_backup(bot, "settings")
+            if d: msg.append("ayar: " + str(settings_restore(d)))
+        _HASH["emoji"] = json.dumps(EMO_CACHE, sort_keys=True)
+        _HASH["pro"] = json.dumps(pro_snapshot(), sort_keys=True, default=str)
+        _HASH["set"] = json.dumps(settings_snapshot(), sort_keys=True, default=str)
         await rp(ctx, OK("GERİ YÜKLENDİ", ", ".join(msg) or "Yedek bulunamadı."))
     else:
         await rp(ctx, head("log", "YEDEK DURUMU") + "\n" + KV([
             (e("dot")+" Kanal", "<#" + str(BACKUP_CH) + ">"), (e("dot")+" Emoji slot", len(EMO_CACHE)),
             (e("dot")+" Pro üye", len(db.all("SELECT 1 FROM users WHERE pro=1"))),
-            (e("dot")+" Pro log", len(db.all("SELECT 1 FROM pro_logs"))), (e("time")+" Kontrol", "her 1 dk (otomatik)")]))
+            (e("dot")+" Pro log", len(db.all("SELECT 1 FROM pro_logs"))),
+            (e("dot")+" Ayar kaydı", sum(len(v) for v in settings_snapshot().values())),
+            (e("time")+" Kontrol", "her 1 dk (otomatik)")]))
 @kategori("owner")
 @bot.command(name="güncelleme-kanal", aliases=["guncelleme-kanal"], help="<#kanal|kapat> — Bildirim kanalı")
 @is_owner()
