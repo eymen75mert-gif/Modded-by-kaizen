@@ -1172,6 +1172,13 @@ bot = KatreBot()
 # 🌐 GENEL
 # ═══════════════════════════════════════════════════════════════════════════
 @kategori("genel")
+@bot.command(name="komutbilgi", aliases=["cmd"], help="<komut adı> — Komut detayı")
+async def komutbilgi(ctx, *, name: str):
+    c = bot.get_command(name.lower().replace("k!", ""))
+    if not c: return await rp(ctx, ER("BULUNAMADI", "Örnek: `k!komutbilgi mute`"))
+    await rp(ctx, head("info", "k!" + c.name) + "\n" + (c.help or "—") +
+             "\n" + e("dot") + " Kullanım: `k!" + c.name + (" " + c.signature if c.signature else "") + "`")
+@kategori("genel")
 @bot.command(name="yardım", aliases=["yardim","help","komutlar"], help="Yardım menüsü")
 @commands.cooldown(1, 5, commands.BucketType.user)
 async def yardim(ctx): await rp(ctx, help_content(bot), HelpView(bot).links())
