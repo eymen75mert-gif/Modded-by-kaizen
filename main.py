@@ -1590,7 +1590,7 @@ async def kurulum(ctx):
 @kategori("sys")
 @bot.command(name="tempvoice", aliases=["geçicises"], help="[kur|#seskanalı|kapat] — Temp voice sistemi")
 @commands.has_permissions(administrator=True)
-@commands.bot_has_permissions(manage_channels=True, move_members=True)
+@commands.bot_has_permissions(administrator=True)
 async def tempvoice(ctx, *, arg=None):
     if arg and arg.lower() in ("kapat","off","0"):
         db.q("DELETE FROM tempvoice WHERE guild_id=?", (ctx.guild.id,))
