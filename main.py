@@ -938,7 +938,7 @@ async def davet(ctx):
     v.add_item(Button(label="Destek", url=SUPPORT_URL, style=discord.ButtonStyle.link, emoji="🔗"))
     await rp(ctx, head("logo", "KATRE BOT'U EKLE") + "\n" + u, v)
 @kategori("genel")
-@bot.command(name="avatar", aliases=["av","pp"], help="Avatar")
+@bot.command(name="avatar", aliases=["av","pfp"], help="Avatar")
 async def avatar(ctx, u: discord.Member = None):
     u = u or ctx.author
     v = View(); v.add_item(Button(label="Tarayıcıda Aç", url=u.display_avatar.url, style=discord.ButtonStyle.link, emoji="🔗"))
