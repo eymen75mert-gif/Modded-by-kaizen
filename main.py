@@ -363,9 +363,19 @@ class HelpSelect(Select):
                                  description=CAT_DESC[k][:60]) for k in CATS])
         self.bot = bot
     async def callback(self, it):
-        if self.values[0] == "owner" and it.user.id != OWNER_ID and not is_half_owner(it.user.id):
-            return await it.response.send_message(ER("YETKİ YOK", "Owner paneli sadece sahibine açık."), ephemeral=True)
-        await it.response.edit_message(content=cat_content(self.bot, self.values[0]), view=self.view)
+        await it.response.defer()   # ✅ zaman aşımını öldürür
+        try:
+            key = self.values[0]
+            if key == "owner" and it.user.id != OWNER_ID and not is_half_owner(it.user.id):
+                return await it.edit_original_response(content=ER("YETKİ YOK", "Owner paneli sadece sahibine açık."))
+            txt = cat_content(self.bot, key)
+            if len(txt) > 2000:
+                txt = txt[:1990] + "\n..."
+            await it.edit_original_response(content=txt, view=self.view)
+        except Exception as ex:
+            try: await it.edit_original_response(content=ER("MENÜ HATASI", "```\n" + str(ex)[:300] + "\n```"))
+            except Exception: pass
+
 class HelpView(View):
     def __init__(self, bot):
         super().__init__(timeout=None); self.bot = bot
