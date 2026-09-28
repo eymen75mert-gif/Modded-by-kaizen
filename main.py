@@ -342,7 +342,7 @@ def help_content(bot):
          "Büyük/küçük prefix fark etmez: `K!` da geçerli.", "",
          "Aşağıdaki menüden bir kategori seç.", "", e("star") + " **Kategoriler**", ""]
     for k in CATS:
-    L += [e(k) + " **" + CATS[k][1] + "** ─ `" + str(cat_count(bot, k)) + "` komut", CAT_DESC[k], ""]
+        L += [e(k) + " **" + CATS[k][1] + "** ─ `" + str(cat_count(bot, k)) + "` komut", CAT_DESC[k], ""]
     L.append(e("link") + " Destek: " + SUPPORT_URL)
     return "\n".join(L)
 
