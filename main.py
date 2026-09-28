@@ -1,5 +1,5 @@
 # ═══════════════════════════════════════════════════════════════════════════
-#  💧 KATRE BOT v3.5.2 — TEK DOSYA • OYLAMA FIX • GÜZEL AFK • BULUT AYARLAR
+#  💧 KATRE BOT v3.7 — TEK DOSYA • SAYFALI YARDIM • BUTONLU OYLAMA • TEMP VOICE
 #  ─ ENV: BOT_TOKEN, OWNER_ID, SUPPORT_URL, BACKUP_CHANNEL_ID
 #  ─ pip install -U discord.py
 # ═══════════════════════════════════════════════════════════════════════════
@@ -17,14 +17,15 @@ DB_PATH     = os.getenv("DB_PATH", "katre.db")
 BACKUP_CH   = int(os.getenv("BACKUP_CHANNEL_ID", "0"))
 MARKER      = "#KATRE_YEDEK"
 DIV = "──────────────────────────────"
+PAGE_SIZE = 15
 
-BOT_VERSION = "3.5.2"
+BOT_VERSION = "3.7"
 CHANGELOG = {
- "3.5.2": ["🗳️ Oylama düzeltildi (hata olursa sebebi görünür, butonlar garantili)",
-           "😴 AFK güzelleştirildi: sebep paneli, mention sayacı, dönüş özeti",
-           "☁️ AYARLAR BULUTTA: hoşgeldin, ceza sistemi, koruma, otocevap, sayaç,",
-           "    seviye rol, log, badword, tempvoice → restart/redeploy sonrası aynen kalır"],
- "3.5.1": ["🗳️ Butonlu oylama (tek oy, değiştirilemez)"],
+ "3.7": ["📚 Yardım kategorileri SAYFALI (15 komut/sayfa, ◀ ▶ butonları)",
+         "⏱️ Menü 'zaman aşımı' hatası kesin çözüldü (defer sistemi)",
+         "📖 Yeni: k!komutbilgi <komut> — tek komut detayı",
+         "🔧 Bot yetkisi eksikse artık net mesaj veriyor"],
+ "3.5.2": ["🗳️ Oylama fix", "😴 AFK güzelleştirme", "☁️ Ayarlar bulut yedeği"],
 }
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -172,7 +173,7 @@ def auto_map_emojis(guild):
     return mapped
 
 # ═══════════════════════════════════════════════════════════════════════════
-# ☁️ BULUT YEDEK (EMOJİ + PRO + ✅ AYARLAR)
+# ☁️ BULUT YEDEK (EMOJİ + PRO + AYARLAR)
 # ═══════════════════════════════════════════════════════════════════════════
 _HASH = {"emoji": None, "pro": None, "set": None}
 SET_TABLES = ["servers","punish_config","protections","app_settings","counters",
@@ -344,14 +345,18 @@ def help_content(bot):
         L += [e("arrow") + " " + e(k) + " **" + CATS[k][1] + "**  `" + str(cat_count(bot, k)) + "` komut", CAT_DESC[k], ""]
     L.append(e("link") + " Destek: " + SUPPORT_URL)
     return "\n".join(L)
-def cat_content(bot, key):          # ← 347. satır
-    L = [e(key) + " **" + CATS[key][1].upper() + "**", DIV, ""]
-    for c in sorted([c for c in bot.commands if getattr(c, "kategori", None) == key], key=lambda x: x.name):
-        L.append(e("arrow") + " `k!" + c.name + "` ─ " + (c.help or ""))
-    L += ["", e("info") + " Ana menü için butonu kullan."]
-    return "\n".join(L)              # ← 352. satır
- 
 
+def cat_content(bot, key, page=1):
+    """📚 SAYFALI kategori listesi — 2000 limitine asla takılmaz"""
+    cmds = sorted([c for c in bot.commands if getattr(c, "kategori", None) == key], key=lambda x: x.name)
+    pages = [cmds[i:i+PAGE_SIZE] for i in range(0, len(cmds), PAGE_SIZE)] or [[]]
+    page = max(1, min(page, len(pages)))
+    base = [e(key) + " **" + CATS[key][1].upper() + "** (" + str(len(cmds)) + " komut) ─ Sayfa " + str(page) + "/" + str(len(pages)), DIV, ""]
+    body = "\n".join(base + [e("arrow") + " `k!" + c.name + "` ─ " + (c.help or "") for c in pages[page-1]])
+    if len(body) > 1900:
+        body = "\n".join(base + ["`k!" + c.name + "`" for c in pages[page-1]])
+    body += "\n\n" + e("info") + " Sayfa " + str(page) + "/" + str(len(pages)) + " • ◀ ▶ ile gezin • 🏠 ana menü"
+    return body[:1990]
 
 # ═══════════════════════════════════════════════════════════════════════════
 # 🔘 VIEW'LAR (🛡️ KALICI)
@@ -363,15 +368,12 @@ class HelpSelect(Select):
                                  description=CAT_DESC[k][:60]) for k in CATS])
         self.bot = bot
     async def callback(self, it):
-        await it.response.defer()   # ✅ zaman aşımını öldürür
+        await it.response.defer()
         try:
             key = self.values[0]
             if key == "owner" and it.user.id != OWNER_ID and not is_half_owner(it.user.id):
                 return await it.edit_original_response(content=ER("YETKİ YOK", "Owner paneli sadece sahibine açık."))
-            txt = cat_content(self.bot, key)
-            if len(txt) > 2000:
-                txt = txt[:1990] + "\n..."
-            await it.edit_original_response(content=txt, view=self.view)
+            await it.edit_original_response(content=cat_content(self.bot, key, 1), view=self.view)
         except Exception as ex:
             try: await it.edit_original_response(content=ER("MENÜ HATASI", "```\n" + str(ex)[:300] + "\n```"))
             except Exception: pass
@@ -380,18 +382,36 @@ class HelpView(View):
     def __init__(self, bot):
         super().__init__(timeout=None); self.bot = bot
         self.add_item(HelpSelect(bot))
+    async def _page(self, it, d):
+        try:
+            content = it.message.content or ""
+            key = None
+            for k, (i, n, _) in CATS.items():
+                if "**" + n.upper() in content: key = k; break
+            if not key:
+                return await it.response.send_message(WN("MENÜ", "Önce menüden bir kategori seç."), ephemeral=True)
+            m = re.search(r"Sayfa (\d+)/(\d+)", content)
+            p = int(m.group(1)) if m else 1
+            await it.response.edit_message(content=cat_content(self.bot, key, p + d), view=self)
+        except Exception as ex:
+            try: await it.response.send_message(ER("SAYFA HATASI", str(ex)[:200]), ephemeral=True)
+            except Exception: pass
+    @discord.ui.button(label="Önceki", style=discord.ButtonStyle.secondary, emoji="◀", row=1, custom_id="kh_prev")
+    async def prev(self, it, b): await self._page(it, -1)
+    @discord.ui.button(label="Sonraki", style=discord.ButtonStyle.secondary, emoji="▶", row=1, custom_id="kh_next")
+    async def nxt(self, it, b): await self._page(it, 1)
     @discord.ui.button(label="Ana Menü", style=discord.ButtonStyle.success, emoji="❓", row=1, custom_id="kh_home")
     async def home(self, it, b): await it.response.edit_message(content=help_content(self.bot), view=self)
-    @discord.ui.button(label="İstatistik", style=discord.ButtonStyle.secondary, emoji="📊", row=1, custom_id="kh_stats")
+    @discord.ui.button(label="İstatistik", style=discord.ButtonStyle.secondary, emoji="📊", row=2, custom_id="kh_stats")
     async def stats(self, it, b):
         up = str(datetime.datetime.now() - self.bot.start_time).split(".")[0]
         await it.response.send_message(head("chart", "İSTATİSTİK") + "\n" + KV([
             ("Sunucu", len(self.bot.guilds)), ("Kullanıcı", sum(g.member_count or 0 for g in self.bot.guilds)),
             ("Komut", len(self.bot.commands)), ("Uptime", up), ("Ping", str(round(self.bot.latency*1000))+"ms")]), ephemeral=True)
-    @discord.ui.button(label="Kapat", style=discord.ButtonStyle.danger, emoji="🗑️", row=1, custom_id="kh_close")
+    @discord.ui.button(label="Kapat", style=discord.ButtonStyle.danger, emoji="🗑️", row=2, custom_id="kh_close")
     async def close(self, it, b): await it.message.delete()
     def links(self):
-        self.add_item(Button(label="Destek Sunucusu", url=SUPPORT_URL, style=discord.ButtonStyle.link, emoji="🔗", row=2))
+        self.add_item(Button(label="Destek Sunucusu", url=SUPPORT_URL, style=discord.ButtonStyle.link, emoji="🔗", row=3))
         return self
 
 class ConfirmView(View):
@@ -538,7 +558,7 @@ class GwJumpView(View):
         super().__init__(timeout=None)
         self.add_item(Button(label="Çekilişe Git", url=url, style=discord.ButtonStyle.link, emoji="🔗"))
 
-# ─────────────── 🗳️ BUTONLU OYLAMA (v3.5.2 — SAĞLAMLAŞTIRILDI) ───────────────
+# ─────────────── 🗳️ BUTONLU OYLAMA ───────────────
 def poll_content(p):
     opts = json.loads(p["options"]); votes = json.loads(p["votes"])
     total = sum(len(v) for v in votes.values())
@@ -745,7 +765,7 @@ class AppReviewView(View):
             except Exception: pass
         await it.response.send_message(ER("RED", "<@" + str(a["user_id"]) + ">"))
 
-# ─────────────── 🎤 TEMP VOICE PANELİ (KALICI) ───────────────
+# ─────────────── 🎤 TEMP VOICE PANELİ ───────────────
 class TVNameModal(Modal, title="Oda İsmi"):
     def __init__(self, ch_id):
         super().__init__(); self.ch_id = ch_id
@@ -969,7 +989,6 @@ class KatreBot(commands.Bot):
                 return
             if db.one("SELECT 1 FROM blacklist WHERE user_id=?", (m.author.id,)): return
         except Exception: pass
-        # 😴 AFK (v3.5.2 güzelleştirilmiş)
         try:
             a = db.one("SELECT * FROM afk WHERE user_id=?", (m.author.id,))
             if a:
@@ -1083,10 +1102,17 @@ class KatreBot(commands.Bot):
             await rp(ctx, ER("EKSİK", "`k!" + ctx.command.name + " " + ctx.command.signature + "`")); return
         if isinstance(er, commands.CommandOnCooldown):
             await rp(ctx, head("time", "BEKLEME") + "\n**" + str(int(er.retry_after)) + " sn** sonra dene."); return
+        if isinstance(er, commands.BotMissingPermissions):
+            url = "https://discord.com/oauth2/authorize?client_id=" + str(ctx.bot.user.id) + "&permissions=8&scope=bot%20applications.commands"
+            await rp(ctx, ER("BOT YETKİSİ EKSİK", "Sorun sende değil **botta**! Eksik: `" + ", ".join(er.missing_permissions) +
+                             "`\nÇözüm: Katre rolüne **Yönetici** ver / rolü en üste taşı:\n" + url))
+            return
         if isinstance(er, commands.MissingPermissions):
-            await rp(ctx, ER("YETKİ YOK", "`" + ", ".join(er.missing_permissions) + "`")); return
+            await rp(ctx, ER("YETKİ YOK (SENDE)", "Eksik yetkin: `" + ", ".join(er.missing_permissions) + "`"))
+            return
         if isinstance(er, commands.CheckFailure):
-            await rp(ctx, ER("YETKİ YOK")); return
+            await rp(ctx, ER("YETKİ YOK", "Bu komutu kullanma iznin yok."))
+            return
         if isinstance(er, commands.CommandInvokeError):
             o = er.original
             if isinstance(o, discord.Forbidden):
@@ -1182,16 +1208,17 @@ bot = KatreBot()
 # 🌐 GENEL
 # ═══════════════════════════════════════════════════════════════════════════
 @kategori("genel")
-@bot.command(name="komutbilgi", aliases=["cmd"], help="<komut adı> — Komut detayı")
-async def komutbilgi(ctx, *, name: str):
-    c = bot.get_command(name.lower().replace("k!", ""))
-    if not c: return await rp(ctx, ER("BULUNAMADI", "Örnek: `k!komutbilgi mute`"))
-    await rp(ctx, head("info", "k!" + c.name) + "\n" + (c.help or "—") +
-             "\n" + e("dot") + " Kullanım: `k!" + c.name + (" " + c.signature if c.signature else "") + "`")
-@kategori("genel")
 @bot.command(name="yardım", aliases=["yardim","help","komutlar"], help="Yardım menüsü")
 @commands.cooldown(1, 5, commands.BucketType.user)
 async def yardim(ctx): await rp(ctx, help_content(bot), HelpView(bot).links())
+@kategori("genel")
+@bot.command(name="komutbilgi", aliases=["cmd"], help="<komut adı> — Komut detayı")
+async def komutbilgi(ctx, *, name: str):
+    c = bot.get_command(name.lower().replace("k!", "").strip())
+    if not c: return await rp(ctx, ER("BULUNAMADI", "Örnek: `k!komutbilgi mute`"))
+    await rp(ctx, head("info", "k!" + c.name) + "\n" + (c.help or "—") +
+             "\n" + e("dot") + " Kullanım: `k!" + c.name + (" " + c.signature if c.signature else "") + "`" +
+             "\n" + e("dot") + " Kategori: `" + getattr(c, "kategori", "—") + "`")
 @kategori("genel")
 @bot.command(name="ping", help="Gecikme")
 async def ping(ctx):
@@ -1954,7 +1981,7 @@ async def yazıtura(ctx): await rp(ctx, e("dice") + " Sonuç: **" + random.choic
 @bot.command(name="zar", help="Zar")
 async def zar(ctx):
     r = random.randint(1, 6)
-    await rp(ctx, e("dice") + " Zar: **" + str(r) + "** " + ["⚀","","⚂","⚃","⚄","⚅"][r-1])
+    await rp(ctx, e("dice") + " Zar: **" + str(r) + "** " + ["⚀","","⚂","","⚄",""][r-1])
 @kategori("fun")
 @bot.command(name="aşk", aliases=["ask","love"], help="<@üye> aşk ölçer")
 async def aşk(ctx, u: discord.Member):
@@ -1964,7 +1991,7 @@ async def aşk(ctx, u: discord.Member):
 @kategori("fun")
 @bot.command(name="slot", help="Slot")
 async def slot(ctx):
-    s = ["🍒","","🍇","💎","7️⃣","🔔"]; r = [random.choice(s) for _ in range(3)]
+    s = ["🍒","","🍇","","7️","🔔"]; r = [random.choice(s) for _ in range(3)]
     w = len(set(r)) == 1
     await rp(ctx, head("slot", "SLOT") + "\n┃ " + " ┃ ".join(r) + " ┃\n" + ("**JACKPOT!**" if w else "Olmadı..."))
 @kategori("fun")
