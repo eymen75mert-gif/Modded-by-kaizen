@@ -1,12 +1,12 @@
 # ═══════════════════════════════════════════════════════════════════════════
-#  💧 KATRE BOT v3.2 — TEK DOSYA • HALF OWNER • BULUT YEDEK • EMBEDSİZ
+#  💧 KATRE BOT v3.4 — TEK DOSYA • BAKIM MESAJI • RESTART • KALICI BUTONLAR
 #  ─ ENV: BOT_TOKEN, OWNER_ID, SUPPORT_URL, BACKUP_CHANNEL_ID
 #  ─ pip install -U discord.py
 # ═══════════════════════════════════════════════════════════════════════════
 import discord
 from discord.ext import commands, tasks
 from discord.ui import View, Button, Select, Modal, TextInput
-import sqlite3, os, json, random, asyncio, datetime, traceback, textwrap, io, re
+import sqlite3, os, sys, json, random, asyncio, datetime, traceback, textwrap, io, re
 from collections import deque
 from contextlib import redirect_stdout
 
@@ -17,6 +17,15 @@ DB_PATH     = os.getenv("DB_PATH", "katre.db")
 BACKUP_CH   = int(os.getenv("BACKUP_CHANNEL_ID", "0"))
 MARKER      = "#KATRE_YEDEK"
 DIV = "──────────────────────────────"
+
+BOT_VERSION = "3.4"
+CHANGELOG = {
+ "3.4": ["🔧 Bakım modu açıkken komutlara BAKIMDAYIZ mesajı (null değil)",
+         "🔄 k!restart — bot kendini yeniden başlatır",
+         "🛡️ Kalıcı butonlar: restart/redeploy sonrası eski butonlar çalışır",
+         "📢 Güncelleme bildirim sistemi entegre"],
+ "3.3": ["📢 Güncelleme bildirim sistemi", "👥 Half Owner sistemi", "🔓 unban/banlist"],
+}
 
 # ═══════════════════════════════════════════════════════════════════════════
 # 🗄️ DB
@@ -34,6 +43,7 @@ class DB:
             warnings INTEGER DEFAULT 0, pro INTEGER DEFAULT 0, pro_expiry TEXT, pro_color TEXT,
             pro_tag TEXT, xp2 INTEGER DEFAULT 0, birthday TEXT, notes TEXT DEFAULT '[]', rep INTEGER DEFAULT 0);
         CREATE TABLE IF NOT EXISTS owner_settings(id INTEGER PRIMARY KEY DEFAULT 1, maintenance INTEGER DEFAULT 0);
+        CREATE TABLE IF NOT EXISTS bot_meta(key TEXT PRIMARY KEY, value TEXT);
         CREATE TABLE IF NOT EXISTS half_owners(user_id INTEGER PRIMARY KEY, since TEXT, added_by INTEGER);
         CREATE TABLE IF NOT EXISTS giveaways(message_id INTEGER PRIMARY KEY, guild_id INTEGER, channel_id INTEGER,
             prize TEXT, winners INTEGER, end_time REAL, participants TEXT DEFAULT '[]', status TEXT DEFAULT 'active', host INTEGER);
@@ -78,6 +88,9 @@ def ensure_server(g): db.q("INSERT OR IGNORE INTO servers(guild_id) VALUES(?)", 
 def pro_log(u, a, d=0, b=0):
     db.q("INSERT INTO pro_logs(user_id,action,days,by_id,ts) VALUES(?,?,?,?,?)", (u, a, d, b, datetime.datetime.now().isoformat()))
 def is_half_owner(uid): return db.one("SELECT 1 FROM half_owners WHERE user_id=?", (uid,)) is not None
+def is_maintenance():
+    r = db.one("SELECT maintenance FROM owner_settings WHERE id=1")
+    return bool(r and r["maintenance"])
 
 async def guild_log_send(guild, text):
     r = db.one("SELECT channel_id FROM guild_logs WHERE guild_id=?", (guild.id,))
@@ -89,7 +102,6 @@ async def guild_log_send(guild, text):
     return False
 
 def mod_guard(ctx, t, verb):
-    """✅ Kendini / owner'ı / half owner'ı / üst yetkiliyi korur"""
     if t.id == ctx.author.id: return "Kendini " + verb + " edemezsin!"
     if t.id == OWNER_ID: return "Bot sahibine işlem yapamazsın!"
     if is_half_owner(t.id): return "Half Owner'a işlem yapamazsın!"
@@ -207,7 +219,7 @@ async def pull_backup(bot, kind):
         traceback.print_exc(); return None
 
 # ═══════════════════════════════════════════════════════════════════════════
-# ✍️ MARKDOWN UI
+# ✍️ MARKDOWN UI + GÜNCELLEME BİLDİRİMİ
 # ═══════════════════════════════════════════════════════════════════════════
 def head(icon, title): return e(icon) + " **" + title + "**\n" + DIV
 def OK(t, b=None): return head("check", t) + ("\n" + b if b else "")
@@ -237,6 +249,29 @@ def fancy(t):
         else: o.append(ch)
     return "".join(o)
 
+async def check_update(bot):
+    """📢 Sürüm değiştiyse bildirim kanalına duyuru atar"""
+    try:
+        row = db.one("SELECT value FROM bot_meta WHERE key='update_ch'")
+        ch_id = int(row["value"]) if row else int(os.getenv("UPDATE_CHANNEL_ID", "0") or 0)
+        if not ch_id: return
+        ch = bot.get_channel(ch_id) or await bot.fetch_channel(ch_id)
+        last = db.one("SELECT value FROM bot_meta WHERE key='version'")
+        last_v = last["value"] if last else None
+        if last_v == BOT_VERSION: return
+        L = [e("party") + " **KATRE BOT GÜNCELLENDİ!**", DIV,
+             e("spark") + " Yeni sürüm: **v" + BOT_VERSION + "**" + (("   (önceki: v" + last_v + ")") if last_v else ""),
+             e("time") + " Tarih: <t:" + str(int(datetime.datetime.now().timestamp())) + ":F>", ""]
+        notes = CHANGELOG.get(BOT_VERSION, [])
+        if notes:
+            L.append(e("star") + " **BU SÜRÜMDE GELENLER:**")
+            L += [e("arrow") + " " + n for n in notes]
+        L += ["", e("logo") + " Katre Bot • `k!yardım`"]
+        await ch.send("\n".join(L))
+        db.q("INSERT OR REPLACE INTO bot_meta(key,value) VALUES('version',?)", (BOT_VERSION,))
+    except Exception:
+        traceback.print_exc()
+
 class OwnerOnly(commands.CheckFailure): pass
 class ProOnly(commands.CheckFailure): pass
 def is_owner():
@@ -245,7 +280,6 @@ def is_owner():
         return True
     return commands.check(p)
 def is_half():
-    """✅ Owner VEYA Half Owner"""
     async def p(ctx):
         if ctx.author.id == OWNER_ID: return True
         if is_half_owner(ctx.author.id): return True
@@ -289,12 +323,11 @@ def cat_content(bot, key):
     return "\n".join(L)
 
 # ═══════════════════════════════════════════════════════════════════════════
-# 🔘 VIEW'LAR
+# 🔘 VIEW'LAR (🛡️ KALICI: custom_id + timeout=None → restart sonrası çalışır)
 # ═══════════════════════════════════════════════════════════════════════════
 class HelpSelect(Select):
     def __init__(self, bot):
-        # ✅ FIX: placeholder'da özel emoji KULLANILMAZ (ham yazı görünüyordu)
-        super().__init__(placeholder="Kategori seç...", min_values=1, max_values=1, row=0,
+        super().__init__(placeholder="Kategori seç...", min_values=1, max_values=1, row=0, custom_id="kh_sel",
                          options=[discord.SelectOption(label=CATS[k][1], value=k, emoji=SLOTS.get(k, "•"),
                                  description=CAT_DESC[k][:60]) for k in CATS])
         self.bot = bot
@@ -304,17 +337,17 @@ class HelpSelect(Select):
         await it.response.edit_message(content=cat_content(self.bot, self.values[0]), view=self.view)
 class HelpView(View):
     def __init__(self, bot):
-        super().__init__(timeout=600); self.bot = bot
+        super().__init__(timeout=None); self.bot = bot   # 🛡️ kalıcı
         self.add_item(HelpSelect(bot))
-    @discord.ui.button(label="Ana Menü", style=discord.ButtonStyle.success, emoji="❓", row=1)
+    @discord.ui.button(label="Ana Menü", style=discord.ButtonStyle.success, emoji="❓", row=1, custom_id="kh_home")
     async def home(self, it, b): await it.response.edit_message(content=help_content(self.bot), view=self)
-    @discord.ui.button(label="İstatistik", style=discord.ButtonStyle.secondary, emoji="📊", row=1)
+    @discord.ui.button(label="İstatistik", style=discord.ButtonStyle.secondary, emoji="📊", row=1, custom_id="kh_stats")
     async def stats(self, it, b):
         up = str(datetime.datetime.now() - self.bot.start_time).split(".")[0]
         await it.response.send_message(head("chart", "İSTATİSTİK") + "\n" + KV([
             ("Sunucu", len(self.bot.guilds)), ("Kullanıcı", sum(g.member_count or 0 for g in self.bot.guilds)),
             ("Komut", len(self.bot.commands)), ("Uptime", up), ("Ping", str(round(self.bot.latency*1000))+"ms")]), ephemeral=True)
-    @discord.ui.button(label="Kapat", style=discord.ButtonStyle.danger, emoji="🗑️", row=1)
+    @discord.ui.button(label="Kapat", style=discord.ButtonStyle.danger, emoji="🗑️", row=1, custom_id="kh_close")
     async def close(self, it, b): await it.message.delete()
     def links(self):
         self.add_item(Button(label="Destek Sunucusu", url=SUPPORT_URL, style=discord.ButtonStyle.link, emoji="🔗", row=2))
@@ -345,18 +378,18 @@ class SetupConfirmView(View):
 
 class OwnerPanelView(View):
     def __init__(self, bot):
-        super().__init__(timeout=600); self.bot = bot
+        super().__init__(timeout=None); self.bot = bot   # 🛡️ kalıcı
     async def g(self, it):
         if it.user.id != OWNER_ID:
             await it.response.send_message(ER("YETKİ YOK"), ephemeral=True); return False
         return True
-    @discord.ui.button(label="Bakım Modu", style=discord.ButtonStyle.secondary, emoji="🔧")
+    @discord.ui.button(label="Bakım Modu", style=discord.ButtonStyle.secondary, emoji="🔧", custom_id="op_bak")
     async def bk(self, it, b):
         if not await self.g(it): return
         cur = db.one("SELECT maintenance FROM owner_settings WHERE id=1")["maintenance"]
         db.q("UPDATE owner_settings SET maintenance=? WHERE id=1", (0 if cur else 1,))
-        await it.response.send_message(head("gear", "BAKIM MODU") + "\n**" + ("AÇIK — sadece owner" if not cur else "KAPALI — herkese açık") + "**", ephemeral=True)
-    @discord.ui.button(label="İstatistik", style=discord.ButtonStyle.success, emoji="📊")
+        await it.response.send_message(head("gear", "BAKIM MODU") + "\n**" + ("AÇIK — kullanıcılar BAKIMDAYIZ mesajı görür" if not cur else "KAPALI — herkese açık") + "**", ephemeral=True)
+    @discord.ui.button(label="İstatistik", style=discord.ButtonStyle.success, emoji="📊", custom_id="op_stats")
     async def st(self, it, b):
         if not await self.g(it): return
         await it.response.send_message(head("chart", "OWNER İSTATİSTİK") + "\n" + KV([
@@ -364,19 +397,19 @@ class OwnerPanelView(View):
             ("Komut kullanımı", db.one("SELECT SUM(uses) u FROM cmd_stats")["u"] or 0),
             ("Pro üye", len(db.all("SELECT 1 FROM users WHERE pro=1"))),
             ("Half Owner", len(db.all("SELECT 1 FROM half_owners"))),
-            ("Bekleyen başvuru", len(db.all("SELECT 1 FROM applications WHERE status='pending'")))]), ephemeral=True)
-    @discord.ui.button(label="Sunucular", style=discord.ButtonStyle.primary, emoji="🖥️")
+            ("Bakım", "AÇIK" if is_maintenance() else "KAPALI")]), ephemeral=True)
+    @discord.ui.button(label="Sunucular", style=discord.ButtonStyle.primary, emoji="🖥️", custom_id="op_guilds")
     async def gl(self, it, b):
         if not await self.g(it): return
         L = [head("owner", "SUNUCULAR (" + str(len(self.bot.guilds)) + ")")]
         for i, g in enumerate(sorted(self.bot.guilds, key=lambda x: -(x.member_count or 0))[:10], 1):
             L.append(e("arrow") + " **" + g.name + "** ─ " + str(g.member_count) + " üye")
         await it.response.send_message("\n".join(L), ephemeral=True)
-    @discord.ui.button(label="Duyuru", style=discord.ButtonStyle.primary, emoji="📢")
+    @discord.ui.button(label="Duyuru", style=discord.ButtonStyle.primary, emoji="📢", custom_id="op_duy")
     async def dy(self, it, b):
         if not await self.g(it): return
         await it.response.send_modal(BroadcastModal())
-    @discord.ui.button(label="Kapat", style=discord.ButtonStyle.danger, emoji="🗑️")
+    @discord.ui.button(label="Kapat", style=discord.ButtonStyle.danger, emoji="🗑️", custom_id="op_close")
     async def cl(self, it, b):
         if not await self.g(it): return
         await it.message.delete()
@@ -480,7 +513,6 @@ class RoleMenuView(View):
         for i, (rid, nm) in enumerate(roles):
             self.add_item(RoleButton(rid, nm, "kr_" + mid + "_" + str(rid), i // 5))
 
-# ─────────────── 🎫 TICKET (DÜZELTİLDİ) ───────────────
 class TicketModal(Modal, title="Destek Talebi"):
     konu = TextInput(label="Konu", max_length=100)
     acik = TextInput(label="Açıklama", style=discord.TextStyle.paragraph)
@@ -526,8 +558,7 @@ class TicketView(View):
             return await it.response.send_message(ER("YETKİ YOK"), ephemeral=True)
         db.q("UPDATE tickets SET status='closed' WHERE channel_id=?", (it.channel.id,))
         await guild_log_send(it.guild, head("ticket", "TALEP KAPANDI") + "\n" + e("dot") + " Kanal: #" + it.channel.name +
-                             "\n" + e("dot") + " Kullanıcı: <@" + str(t["user_id"]) + ">" +
-                             "\n" + e("dot") + " Kapatan: " + it.user.mention)
+                             "\n" + e("dot") + " Kullanıcı: <@" + str(t["user_id"]) + "> • Kapatan: " + it.user.mention)
         await it.response.send_message(WN("KAPATILIYOR", "Kanal 10 sn içinde silinecek."))
         await asyncio.sleep(10)
         try: await it.channel.delete()
@@ -608,6 +639,7 @@ class AppReviewView(View):
 # ═══════════════════════════════════════════════════════════════════════════
 # 🤖 BOT
 # ═══════════════════════════════════════════════════════════════════════════
+MAINT_CD = {}
 class KatreBot(commands.Bot):
     def __init__(self):
         super().__init__(command_prefix=self.get_prefix, intents=discord.Intents.all(),
@@ -626,7 +658,9 @@ class KatreBot(commands.Bot):
         return list(b)
     async def setup_hook(self):
         self.gwv = GiveawayView(self)
-        for v in (self.gwv, TicketOpenView(), TicketView(), AppOpenView()): self.add_view(v)
+        # 🛡️ KALICI VIEW'LAR: restart/redeploy sonrası eski butonlar çalışır
+        for v in (self.gwv, TicketOpenView(), TicketView(), AppOpenView(), HelpView(self), OwnerPanelView(self)):
+            self.add_view(v)
         self.status_loop.start(); self.gw_checker.start(); self.pro_checker.start(); self.backup_loop.start()
     async def on_ready(self):
         try:
@@ -652,8 +686,10 @@ class KatreBot(commands.Bot):
             _HASH["emoji"] = json.dumps(EMO_CACHE, sort_keys=True)
             _HASH["pro"] = json.dumps(pro_snapshot(), sort_keys=True)
         refresh_emojis()
-        print("💧 KATRE v3.2 | " + str(self.user) + " | " + str(len(self.guilds)) + " sunucu | " +
-              str(len(self.commands)) + " komut | yedek: " + ("AÇIK" if BACKUP_CH else "KAPALI"))
+        await check_update(self)
+        print("💧 KATRE v" + BOT_VERSION + " | " + str(self.user) + " | " + str(len(self.guilds)) + " sunucu | " +
+              str(len(self.commands)) + " komut | yedek: " + ("AÇIK" if BACKUP_CH else "KAPALI") +
+              " | bakım: " + ("AÇIK" if is_maintenance() else "KAPALI"))
         await self.change_presence(activity=discord.Activity(type=discord.ActivityType.watching, name="k!yardım | Katre Bot"))
     @tasks.loop(seconds=12)
     async def status_loop(self):
@@ -735,7 +771,20 @@ class KatreBot(commands.Bot):
     async def on_message(self, m):
         if m.author.bot: return
         try:
-            if db.one("SELECT maintenance FROM owner_settings WHERE id=1")["maintenance"] and m.author.id != OWNER_ID: return
+            # 🔧 BAKIM MODU: null yerine BAKIMDAYIZ mesajı (komut denemelerine, 30sn'de 1)
+            if is_maintenance() and m.author.id != OWNER_ID:
+                prefs = await self.get_prefix(m)
+                if m.content and any(m.content.startswith(p) for p in prefs):
+                    nw = datetime.datetime.now().timestamp()
+                    if nw - MAINT_CD.get(m.author.id, 0) > 30:
+                        MAINT_CD[m.author.id] = nw
+                        try:
+                            await m.channel.send(head("warn", "BAKIMDAYIZ") + "\n" +
+                                e("gear") + " Katre Bot şu anda **bakım modunda**, komutlar geçici olarak kapalı.\n" +
+                                e("time") + " En kısa sürede geri döneceğiz!\n" +
+                                e("link") + " Destek: " + SUPPORT_URL)
+                        except Exception: pass
+                return
             if db.one("SELECT 1 FROM blacklist WHERE user_id=?", (m.author.id,)): return
         except Exception: pass
         try:
@@ -928,6 +977,7 @@ async def istatistik(ctx):
     await rp(ctx, head("chart", "KATRE İSTATİSTİK") + "\n" + KV([
         ("Sunucu", len(bot.guilds)), ("Kullanıcı", sum(g.member_count or 0 for g in bot.guilds)),
         ("Komut", len(bot.commands)), ("Uptime", up), ("Ping", str(round(bot.latency*1000))+"ms"),
+        ("Sürüm", "v" + BOT_VERSION),
         ("Toplam kullanım", db.one("SELECT SUM(uses) u FROM cmd_stats")["u"] or 0), ("Owner", "<@"+str(OWNER_ID)+">")]))
 @kategori("genel")
 @bot.command(name="davet", aliases=["invite"], help="Davet linki")
@@ -1072,7 +1122,7 @@ async def botkontrol(ctx):
     await rp(ctx, head("gear", "BOT KONTROL #" + ctx.channel.name) + "\n" + "\n".join((e("check") if ok else e("cross")) + " " + n for n, ok in cs))
 
 # ═══════════════════════════════════════════════════════════════════════════
-# 🛡️ MOD (+ UNBAN + GÜVENLİK)
+# 🛡️ MOD
 # ═══════════════════════════════════════════════════════════════════════════
 @kategori("mod")
 @bot.command(name="yasakla", aliases=["ban"], help="<@üye> [sebep]")
@@ -1345,7 +1395,7 @@ async def kurulum(ctx):
     except Exception as ex: await rp(ctx, ER("HATA", "```\n" + str(ex)[:300] + "\n```"))
 
 # ═══════════════════════════════════════════════════════════════════════════
-# 📋 SİSTEMLER (+ TICKET KOMUTLARI)
+# 📋 SİSTEMLER
 # ═══════════════════════════════════════════════════════════════════════════
 @kategori("sys")
 @bot.command(name="ticket", help="<kapat/bilgi/listele> — Ticket yönetimi")
@@ -1464,7 +1514,7 @@ async def zenginler(ctx):
     rs = db.all("SELECT * FROM users ORDER BY coins DESC LIMIT 10")
     if not rs: return await rp(ctx, e("coin") + " Veri yok.")
     L = [head("coin", "EN ZENGİNLER")]
-    md = ["🥇","🥈","🥉"]
+    md = ["🥇","","🥉"]
     for i, r in enumerate(rs):
         L.append((md[i] if i < 3 else "**" + str(i+1) + ".**") + " <@" + str(r["user_id"]) + "> ─ **" + format(r["coins"], ",").replace(",", ".") + "** coin")
     await rp(ctx, "\n".join(L))
@@ -1564,7 +1614,7 @@ async def aşk(ctx, u: discord.Member):
 @kategori("fun")
 @bot.command(name="slot", help="Slot")
 async def slot(ctx):
-    s = ["🍒","🍋","🍇","💎","7️⃣",""]; r = [random.choice(s) for _ in range(3)]
+    s = ["🍒","","🍇","","7️",""]; r = [random.choice(s) for _ in range(3)]
     w = len(set(r)) == 1
     await rp(ctx, head("slot", "SLOT") + "\n┃ " + " ┃ ".join(r) + " ┃\n" + ("**JACKPOT!**" if w else "Olmadı..."))
 @kategori("fun")
@@ -1593,7 +1643,7 @@ async def burç(ctx, *, b):
 @bot.command(name="oylama", aliases=["anket"], help="<soru>")
 async def oylama(ctx, *, s):
     m = await rp(ctx, head("chart", "OYLAMA") + "\n### " + s[:200] + "\n\n👍 Evet • 👎 Hayır • 🤷 Çekimser")
-    for r in ("👍","👎","🤷"): await m.add_reaction(r)
+    for r in ("👍","👎",""): await m.add_reaction(r)
 @kategori("fun")
 @bot.command(name="quiz", aliases=["bilgi"], help="Yarışma +75 coin")
 @commands.cooldown(1, 10, commands.BucketType.user)
@@ -1747,7 +1797,7 @@ async def proxp(ctx):
     await rp(ctx, OK("BOOST", "2x AÇIK" if n else "2x KAPALI"))
 
 # ═══════════════════════════════════════════════════════════════════════════
-# 👑 OWNER + HALF OWNER
+# 👑 OWNER + HALF OWNER + SİSTEM KOMUTLARI
 # ═══════════════════════════════════════════════════════════════════════════
 @kategori("owner")
 @bot.command(name="halfowner", aliases=["coowner","yardımcıowner"], help="<ayarla/kaldır/bilgi/liste> [@üye]")
@@ -1784,12 +1834,28 @@ async def halfowner(ctx, i: str = "bilgi", u: discord.Member = None):
 @bot.command(name="sahip", aliases=["owner","panel"], help="Owner paneli")
 @is_owner()
 async def sahip(ctx):
-    m = db.one("SELECT maintenance FROM owner_settings WHERE id=1")["maintenance"]
     await rp(ctx, head("owner", "OWNER PANELİ") + "\n### Hoş geldin Owner!\n" + KV([
         (e("dot")+" Sunucu", len(bot.guilds)), (e("dot")+" Kullanıcı", sum(g.member_count or 0 for g in bot.guilds)),
-        (e("gear")+" Bakım", "AÇIK" if m else "KAPALI"), (e("log")+" Bulut yedek", "AÇIK" if BACKUP_CH else "KAPALI"),
-        (e("owner")+" Half Owner", len(db.all("SELECT 1 FROM half_owners")))]) +
-        "\n\n`k!prover` `k!proal` `k!prologlar` `k!halfowner` `k!emoji` `k!yedek` `k!bakım` `k!eval`", OwnerPanelView(bot))
+        (e("gear")+" Bakım", "AÇIK" if is_maintenance() else "KAPALI"), (e("log")+" Bulut yedek", "AÇIK" if BACKUP_CH else "KAPALI"),
+        (e("owner")+" Half Owner", len(db.all("SELECT 1 FROM half_owners"))), (e("spark")+" Sürüm", "v" + BOT_VERSION)]) +
+        "\n\n`k!prover` `k!proal` `k!prologlar` `k!halfowner` `k!emoji` `k!yedek` `k!bakım` `k!restart` `k!eval`", OwnerPanelView(bot))
+@kategori("owner")
+@bot.command(name="bakım", aliases=["bakim"], help="<aç/kapat> — Bakım modu")
+@is_owner()
+async def bakım(ctx, mod: str = None):
+    if mod is None or mod.lower() in ("kapat", "off", "0"):
+        db.q("UPDATE owner_settings SET maintenance=0 WHERE id=1")
+        await rp(ctx, OK("BAKIM MODU", "Kapatıldı. Komutlar herkese açık."))
+    else:
+        db.q("UPDATE owner_settings SET maintenance=1 WHERE id=1")
+        await rp(ctx, OK("BAKIM MODU", "Açıldı. Kullanıcılar komut yazınca **BAKIMDAYIZ** mesajı görür."))
+@kategori("owner")
+@bot.command(name="restart", aliases=["yenidenbaşlat","rb"], help="Botu yeniden başlatır")
+@is_owner()
+async def restart(ctx):
+    await rp(ctx, OK("RESTART", "Bot yeniden başlatılıyor... (eski butonlar korunur)"))
+    await asyncio.sleep(1)
+    os.execv(sys.executable, [sys.executable] + sys.argv)
 @kategori("owner")
 @bot.command(name="yedek", help="<durum/kaydet/yükle> [emoji/pro] — Bulut yedek")
 @is_owner()
@@ -1815,6 +1881,30 @@ async def yedek(ctx, i: str = "durum", hedef: str = None):
             (e("dot")+" Kanal", "<#" + str(BACKUP_CH) + ">"), (e("dot")+" Emoji slot", len(EMO_CACHE)),
             (e("dot")+" Pro üye", len(db.all("SELECT 1 FROM users WHERE pro=1"))),
             (e("dot")+" Pro log", len(db.all("SELECT 1 FROM pro_logs"))), (e("time")+" Kontrol", "her 1 dk (otomatik)")]))
+@kategori("owner")
+@bot.command(name="güncelleme-kanal", aliases=["guncelleme-kanal"], help="<#kanal|kapat> — Bildirim kanalı")
+@is_owner()
+async def güncelleme_kanal(ctx, ch: discord.TextChannel = None):
+    if ch is None:
+        db.q("DELETE FROM bot_meta WHERE key='update_ch'")
+        await rp(ctx, OK("GÜNCELLEME KANALI", "Bildirimler kapatıldı."))
+    else:
+        db.q("INSERT OR REPLACE INTO bot_meta(key,value) VALUES('update_ch',?)", (str(ch.id),))
+        await rp(ctx, OK("GÜNCELLEME KANALI", "Yeni sürümler " + ch.mention + " kanalına duyurulacak."))
+@kategori("owner")
+@bot.command(name="sürüm", aliases=["surum","version"], help="Bot sürümü + yenilikler")
+async def sürüm(ctx):
+    await rp(ctx, head("logo", "SÜRÜM v" + BOT_VERSION) + "\n" +
+             "\n".join(e("arrow") + " " + n for n in CHANGELOG.get(BOT_VERSION, [])[:10]))
+@kategori("owner")
+@bot.command(name="güncelleme-test", help="Örnek bildirim gönderir")
+@is_owner()
+async def güncelleme_test(ctx):
+    notes = CHANGELOG.get(BOT_VERSION, [])
+    L = [e("party") + " **KATRE BOT GÜNCELLENDİ! (test)**", DIV,
+         e("spark") + " Sürüm: **v" + BOT_VERSION + "**", ""] + \
+        [e("arrow") + " " + n for n in notes] + ["", e("logo") + " Katre Bot"]
+    await rp(ctx, "\n".join(L))
 @kategori("owner")
 @bot.command(name="emoji", help="<ayarla/yakala/oto/liste/sıfırla/slotlar/rehber>")
 @is_owner()
@@ -1882,14 +1972,6 @@ async def prologlar(ctx, u: discord.User = None):
     await rp(ctx, head("log", "PRO LOG (" + str(len(rs)) + ")") + "\n" + "\n".join(
         e("arrow") + " **#" + str(r["id"]) + " " + r["action"] + "** <@" + str(r["user_id"]) + "> • " + r["ts"][:16].replace("T"," ") +
         (" • " + str(r["days"]) + "g" if r["days"] else "") for r in rs))
-@kategori("owner")
-@bot.command(name="bakım", aliases=["bakim"], help="[aç/kapat]")
-@is_owner()
-async def bakım(ctx, m: str = None):
-    c = db.one("SELECT maintenance FROM owner_settings WHERE id=1")["maintenance"]
-    n = (not c) if m is None else (m.lower() in ("aç","ac","on","1"))
-    db.q("UPDATE owner_settings SET maintenance=? WHERE id=1", (int(n),))
-    await rp(ctx, head("gear", "BAKIM") + "\n**" + ("AÇIK — sadece owner" if n else "KAPALI — herkese açık") + "**")
 @kategori("owner")
 @bot.command(name="prefix", help="<prefix>")
 @is_owner()
