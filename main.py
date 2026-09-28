@@ -342,7 +342,7 @@ def help_content(bot):
          "Büyük/küçük prefix fark etmez: `K!` da geçerli.", "",
          "Aşağıdaki menüden bir kategori seç.", "", e("star") + " **Kategoriler**", ""]
     for k in CATS:
-        L += [e("arrow") + " " + e(k) + " **" + CATS[k][1] + "**  `" + str(cat_count(bot, k)) + "` komut", CAT_DESC[k], ""]
+    L += [e(k) + " **" + CATS[k][1] + "** ─ `" + str(cat_count(bot, k)) + "` komut", CAT_DESC[k], ""]
     L.append(e("link") + " Destek: " + SUPPORT_URL)
     return "\n".join(L)
 
@@ -386,7 +386,7 @@ class HelpView(View):
         try:
             content = it.message.content or ""
             key = None
-            for k, (i, n, _) in CATS.items():
+               for k, (i, n) in CATS.items():
                 if "**" + n.upper() in content: key = k; break
             if not key:
                 return await it.response.send_message(WN("MENÜ", "Önce menüden bir kategori seç."), ephemeral=True)
