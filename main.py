@@ -182,12 +182,15 @@ def sure_txt(dk):
     return str(dk) + " dakika"
 
 _UIBase = Container if HAS_V2 else View
-class Panel(_UIBase):
-    def __init__(self, text, timeout=None):
-        super().__init__(timeout=timeout); self.text = text
+class Panel(_UIBase):                      # ~185
+    def __init__(self, text, timeout=None):  # ~186
+        if HAS_V2: super().__init__()        # 187 ✅ yeni
+        else: super().__init__(timeout=timeout)
+        self.text = text
         if HAS_V2:
             try: self.add_item(TextDisplay(text))
             except Exception: pass
+
     def btn(self, label, cb, style=discord.ButtonStyle.primary, emoji=None, cid=None, row=None):
         b = Button(label=label[:80], style=style, emoji=emoji, custom_id=cid, row=row); b.callback = cb; self.add_item(b); return b
     def btn_url(self, label, url, emoji=None, row=None):
