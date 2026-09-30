@@ -1,6 +1,6 @@
 # ═══════════════════════════════════════════════════════════════════
 #  💧 KATRE BOT v4.3 — BÖLÜM 1/2
-#  ENV: BOT_TOKEN, OWNER_ID, SUPPORT_URL, BACKUP_CHANNEL_ID
+#  ENV: BOTTOKEN, OWNER_ID, SUPPORT_URL, BACKUP_CHANNEL_ID
 #  pip install -U discord.py
 # ═══════════════════════════════════════════════════════════════════
 import discord
