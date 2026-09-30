@@ -985,7 +985,7 @@ async def davet(ctx):
     v = Panel(head("logo", "KATRE BOT'U EKLE")); v.btn_url("Botu Ekle", u, emoji="➕"); v.btn_url("Destek", SUPPORT_URL, emoji=e("link"))
     await rp(ctx, v.text, v)
 @kategori("genel")
-@bot.command(name="avatar", aliases=["av","pp"], help="Avatar")
+@bot.command(name="avatar", aliases=["av","pfp"], help="Avatar")
 async def avatar(ctx, u: discord.Member = None):
     u = u or ctx.author
     v = Panel(head("cam", u.display_name + " AVATAR") + "\n" + u.display_avatar.url); v.btn_url("Aç", u.display_avatar.url, emoji=e("link"))
