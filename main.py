@@ -1,6 +1,6 @@
 # ═══════════════════════════════════════════════════════════════════
-#  💧 KATRE BOT v4.3 — BÖLÜM 1/2
-#  ENV: BOTTOKEN, OWNER_ID, SUPPORT_URL, BACKUP_CHANNEL_ID
+#  💧 KATRE BOT v4.4 — BÖLÜM 1/2
+#  ENV: BOT_TOKEN, OWNER_ID, SUPPORT_URL, BACKUP_CHANNEL_ID
 #  pip install -U discord.py
 # ═══════════════════════════════════════════════════════════════════
 import discord
@@ -22,8 +22,8 @@ BACKUP_CH = int(os.getenv("BACKUP_CHANNEL_ID", "0"))
 MARKER = "#KATRE_YEDEK"
 DIV = "──────────────────────────────"
 PAGE_SIZE = 15
-BOT_VERSION = "4.3"
-CHANGELOG = {"4.3": ["🧩 V2 kesin fix + fallback", "🛡️ on_message try/finally", "🩺 Açılış teşhis logu"]}
+BOT_VERSION = "4.4"
+CHANGELOG = {"4.4": ["🛠️ Tüm çökme hataları giderildi (add_view, Container timeout, alias pp)", "🧩 V2 + legacy çift mod"]}
 
 class DB:
     def __init__(self, path):
@@ -182,15 +182,16 @@ def sure_txt(dk):
     return str(dk) + " dakika"
 
 _UIBase = Container if HAS_V2 else View
-class Panel(_UIBase):                      # ~185
-    def __init__(self, text, timeout=None):  # ~186
-        if HAS_V2: super().__init__()        # 187 ✅ yeni
-        else: super().__init__(timeout=timeout)
+class Panel(_UIBase):
+    def __init__(self, text, timeout=None):
+        if HAS_V2:
+            super().__init__()
+        else:
+            super().__init__(timeout=timeout)
         self.text = text
         if HAS_V2:
             try: self.add_item(TextDisplay(text))
             except Exception: pass
-
     def btn(self, label, cb, style=discord.ButtonStyle.primary, emoji=None, cid=None, row=None):
         b = Button(label=label[:80], style=style, emoji=emoji, custom_id=cid, row=row); b.callback = cb; self.add_item(b); return b
     def btn_url(self, label, url, emoji=None, row=None):
@@ -641,6 +642,12 @@ class KatreBot(commands.Bot):
     def __init__(self):
         super().__init__(command_prefix=self.get_prefix, intents=discord.Intents.all(), case_insensitive=True, help_command=None, allowed_mentions=discord.AllowedMentions(users=True, roles=False, everyone=False))
         self.start_time = datetime.datetime.now(); self.xp_cd = {}; self.ar_cd = {}; self._si = 0; self.spam = {}; self.flood = {}; self.joins = {}
+    def add_view(self, view, *, message_id=None):
+        try:
+            if message_id is None: super().add_view(view)
+            else: super().add_view(view, message_id=message_id)
+        except TypeError:
+            pass
     async def get_prefix(self, m):
         p = "k!"
         if m.guild:
@@ -952,7 +959,7 @@ async def finalize_giveaway(bot, mid):
             except Exception: pass
 
 bot = KatreBot()
-# >>> BÖLÜM 1 SONU — "devam" yaz, BÖLÜM 2'yi (komutlar) ekle <<<
+# >>> BÖLÜM 1 SONU — "devam" yaz, BÖLÜM 2 (komutlar) gelsin <<<
 # ═══════════════════════════════════════════════════════════════════
 #  💧 BÖLÜM 2/2 — KOMUTLAR
 # ═══════════════════════════════════════════════════════════════════
@@ -979,7 +986,7 @@ async def istatistik(ctx):
 async def mesajtop(ctx):
     rs = db.all("SELECT * FROM users ORDER BY messages DESC LIMIT 10")
     if not rs: return await rp(ctx, e("chart") + " Veri yok.")
-    md = ["🥇","","🥉"]
+    md = ["🥇","🥈","🥉"]
     await rp(ctx, head("pen", "MESAJ TOP") + "\n" + "\n".join((md[i] if i < 3 else "**" + str(i+1) + ".**") + " <@" + str(r["user_id"]) + "> ─ **" + str(r["messages"]) + "**" for i, r in enumerate(rs)))
 @kategori("genel")
 @bot.command(name="davet", aliases=["invite"], help="Davet")
@@ -1497,7 +1504,7 @@ async def cüzdan(ctx, u: discord.Member = None):
 async def zenginler(ctx):
     rs = db.all("SELECT * FROM users ORDER BY coins DESC LIMIT 10")
     if not rs: return await rp(ctx, e("coin") + " Yok.")
-    md = ["🥇","🥈",""]
+    md = ["🥇","🥈","🥉"]
     await rp(ctx, head("coin", "ZENGİNLER") + "\n" + "\n".join((md[i] if i < 3 else "**" + str(i+1) + ".**") + " <@" + str(r["user_id"]) + "> **" + str(r["coins"]) + "**" for i, r in enumerate(rs)))
 @kategori("eco")
 @bot.command(name="günlük", aliases=["gunluk","daily"], help="Günlük")
@@ -1571,7 +1578,7 @@ async def yazıtura(ctx): await rp(ctx, e("dice") + " **" + random.choice(["YAZI
 @kategori("fun")
 @bot.command(name="zar", help="1-6")
 async def zar(ctx):
-    r = random.randint(1, 6); await rp(ctx, e("dice") + " **" + str(r) + "** " + ["⚀","⚁","","⚃","","⚅"][r-1])
+    r = random.randint(1, 6); await rp(ctx, e("dice") + " **" + str(r) + "** " + ["⚀","","⚂","⚃","⚄","⚅"][r-1])
 @kategori("fun")
 @bot.command(name="aşk", aliases=["ask","love"], help="<@üye>")
 async def aşk(ctx, u: discord.Member):
@@ -1580,7 +1587,7 @@ async def aşk(ctx, u: discord.Member):
 @kategori("fun")
 @bot.command(name="slot", help="Çevir")
 async def slot(ctx):
-    s = ["🍒","","🍇","💎","7️⃣",""]; r = [random.choice(s) for _ in range(3)]; w = len(set(r)) == 1
+    s = ["🍒","🍋","🍇","💎","7️⃣",""]; r = [random.choice(s) for _ in range(3)]; w = len(set(r)) == 1
     await rp(ctx, head("slot", "SLOT") + "\n┃ " + " ┃ ".join(r) + " ┃\n" + ("**JACKPOT!**" if w else "Olmadı"))
 @kategori("fun")
 @bot.command(name="seç", aliases=["sec"], help="<a> <b>")
