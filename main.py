@@ -1,11 +1,11 @@
 # ═══════════════════════════════════════════════════════════════════
-#  💧 KATRE BOT v4.8 — BÖLÜM 1/2 • BUTON FIX • V2 TEST • YENİ PRO KOMUTLAR
+#  💧 KATRE BOT v4.4 — BÖLÜM 1/2
 #  ENV: BOT_TOKEN, OWNER_ID, SUPPORT_URL, BACKUP_CHANNEL_ID
-#  requirements.txt: discord.py>=2.6.0
+#  pip install -U discord.py
 # ═══════════════════════════════════════════════════════════════════
 import discord
 from discord.ext import commands, tasks
-from discord.ui import View, Button, Select, Modal, TextInput
+from discord.ui import View, Button, Modal, TextInput
 import sqlite3, os, sys, json, random, asyncio, datetime, traceback, textwrap, io, re
 from collections import deque
 from contextlib import redirect_stdout
@@ -22,8 +22,8 @@ BACKUP_CH = int(os.getenv("BACKUP_CHANNEL_ID", "0"))
 MARKER = "#KATRE_YEDEK"
 DIV = "──────────────────────────────"
 PAGE_SIZE = 15
-BOT_VERSION = "4.8"
-CHANGELOG = {"4.8": ["🔘 Buton 'zamanında yanıt vermedi' hatası KÖKTEN çözüldü", "🧩 k!v2test: Components V2 teşhisi", "💎 Yeni PRO komutlar: prorol, probonus, probanner, proşans", "📋 Kategori seçimi SELECT menü"]}
+BOT_VERSION = "4.4"
+CHANGELOG = {"4.4": ["🛠️ Tüm çökme hataları giderildi (add_view, Container timeout, alias pp)", "🧩 V2 + legacy çift mod"]}
 
 class DB:
     def __init__(self, path):
@@ -158,9 +158,6 @@ async def pull_backup(bot, kind):
     except Exception:
         traceback.print_exc(); return None
 
-# ═══════════════════════════════════════════════════════════════════
-# 🎨 UI: V2 METİN KARTI + LEGACY PANEL (BUTON/SELECT GARANTİLİ)
-# ═══════════════════════════════════════════════════════════════════
 def head(i, t): return "## " + e(i) + " " + t + "\n" + DIV
 def OK(t, b=None): return head("check", t) + ("\n" + b if b else "")
 def ER(t, b=None): return head("cross", t) + ("\n" + b if b else "")
@@ -184,54 +181,64 @@ def sure_txt(dk):
     if dk >= 60: return str(dk // 60) + " saat " + str(dk % 60) + " dakika"
     return str(dk) + " dakika"
 
-async def v2_text(sendable, text, eph=False):
-    if HAS_V2:
-        try:
-            con = Container(); con.add_item(TextDisplay(text))
-            if eph: return await sendable.send(view=con, ephemeral=True)
-            return await sendable.send(view=con)
-        except Exception:
-            pass
-    try:
-        if eph: return await sendable.send(text, ephemeral=True)
-        return await sendable.send(text)
-    except Exception: return None
-
-class Panel(View):
+_UIBase = Container if HAS_V2 else View
+class Panel(_UIBase):
     def __init__(self, text, timeout=None):
-        super().__init__(timeout=timeout); self.text = text
+        if HAS_V2:
+            super().__init__()
+        else:
+            super().__init__(timeout=timeout)
+        self.text = text
+        if HAS_V2:
+            try: self.add_item(TextDisplay(text))
+            except Exception: pass
     def btn(self, label, cb, style=discord.ButtonStyle.primary, emoji=None, cid=None, row=None):
         b = Button(label=label[:80], style=style, emoji=emoji, custom_id=cid, row=row); b.callback = cb; self.add_item(b); return b
     def btn_url(self, label, url, emoji=None, row=None):
         b = Button(label=label[:80], style=discord.ButtonStyle.link, url=url, emoji=emoji, row=row); self.add_item(b); return b
 
 async def rp(ctx, text, view=None):
-    if view is None: return await v2_text(ctx, text)
-    try: return await ctx.send(text, view=view)
+    if view is None: view = Panel(text)
+    if HAS_V2 and view.children:
+        try: return await ctx.send(view=view)
+        except Exception: traceback.print_exc()
+    try: return await ctx.send(text, view=view if not HAS_V2 else None)
     except Exception:
         try: return await ctx.send(text)
         except Exception: return None
 async def rp_ch(ch, text, view=None):
-    if view is None: return await v2_text(ch, text)
-    try: return await ch.send(text, view=view)
+    if view is None: view = Panel(text)
+    if HAS_V2 and view.children:
+        try: return await ch.send(view=view)
+        except Exception: traceback.print_exc()
+    try: return await ch.send(text, view=view if not HAS_V2 else None)
     except Exception:
         try: return await ch.send(text)
         except Exception: return None
 async def editv(it, view):
-    return await it.response.edit_message(content=view.text, view=view)
+    if HAS_V2 and view.children:
+        try: return await it.response.edit_message(view=view)
+        except Exception: traceback.print_exc()
+    return await it.response.edit_message(content=view.text, view=view if not HAS_V2 else None)
 async def editv_def(it, view):
-    return await it.edit_original_response(content=view.text, view=view)
+    if HAS_V2 and view.children:
+        try: return await it.edit_original_response(view=view)
+        except Exception: traceback.print_exc()
+    return await it.edit_original_response(content=view.text, view=view if not HAS_V2 else None)
 async def sendv_eph(it, text):
-    """✅ v4.8 FIX: Interaction'a kesin yanıt (response → followup zinciri)"""
     if HAS_V2:
-        try:
-            con = Container(); con.add_item(TextDisplay(text))
-            return await it.response.send_message(view=con, ephemeral=True)
-        except Exception: pass
-    try: return await it.response.send_message(text, ephemeral=True)
-    except Exception:
-        try: return await it.followup.send(text, ephemeral=True)
-        except Exception: return None
+        try: return await it.response.send_message(view=Panel(text), ephemeral=True)
+        except Exception: traceback.print_exc()
+    return await it.response.send_message(text, ephemeral=True)
+def get_msg_text(m):
+    outs = []
+    try:
+        for comp in m.components:
+            if comp.__class__.__name__ == "TextDisplay" and getattr(comp, "content", None): outs.append(comp.content)
+            for ch in getattr(comp, "children", []) or []:
+                if ch.__class__.__name__ == "TextDisplay" and getattr(ch, "content", None): outs.append(ch.content)
+    except Exception: pass
+    return "\n".join(outs) if outs else (m.content or "")
 async def guild_log_send(g, t):
     r = db.one("SELECT channel_id FROM guild_logs WHERE guild_id=?", (g.id,))
     if r and r["channel_id"]:
@@ -281,12 +288,11 @@ def kategori(a):
     return d
 
 CATS = {"genel":("genel","Genel & Sistem"),"mod":("mod","Moderasyon & Koruma"),"sys":("sys","Başvuru & Otomasyon"),"eco":("eco","Ekonomi"),"fun":("fun","Eğlence"),"give":("give","Çekiliş"),"pro":("pro","Pro"),"owner":("owner","Owner")}
-CAT_DESC = {"genel":"Rank, profil, avatar, snipe, AFK, oda","mod":"Ban, kick, unban, mute, uyarı, oto-ceza, koruma","sys":"Başvuru, ticket, temp voice, oto-cevap, sayaç, log","eco":"Coin, günlük, çalışma, balık, maden, market","fun":"Quiz, slot, aşk, anket ve oyunlar","give":"Butonlu çekiliş, reroll, sonuç paneli","pro":"Pro oda, rol, bonus, banner, şans","owner":"Owner + Half Owner paneli"}
+CAT_DESC = {"genel":"Rank, profil, avatar, snipe, AFK, oda","mod":"Ban, kick, unban, mute, uyarı, oto-ceza, koruma","sys":"Başvuru, ticket, temp voice, oto-cevap, sayaç, log","eco":"Coin, günlük, çalışma, balık, maden, market","fun":"Quiz, slot, aşk, anket ve oyunlar","give":"Butonlu çekiliş, reroll, sonuç paneli","pro":"Pro oda, renk, tag, boost","owner":"Owner + Half Owner paneli"}
 def cat_count(b, k): return len([c for c in b.commands if getattr(c, "kategori", None) == k])
 def help_content(bot):
     L = ["## " + e("logo") + " " + bot.user.name.upper() + " YARDIM MENÜSÜ", DIV, "Selam, ben **" + bot.user.name + "!** " + e("spark"),
-         "Toplam **" + str(len(bot.commands)) + "** komutum var; `k!komut` şeklinde çalışır.", "",
-         e("star") + " **Kategoriler:** aşağıdaki **menüden** seç!", ""]
+         "Toplam **" + str(len(bot.commands)) + "** komutum var; `k!komut` şeklinde çalışır.", "", e("star") + " **Kategoriler — butonlardan seç:**", ""]
     for k in CATS: L += [e(k) + " **" + CATS[k][1] + "** ─ `" + str(cat_count(bot, k)) + "` komut", "> " + CAT_DESC[k], ""]
     L.append(e("link") + " Destek: " + SUPPORT_URL); return "\n".join(L)
 def cat_content(bot, key, page=1):
@@ -298,26 +304,14 @@ def cat_content(bot, key, page=1):
     if len(body) > 1900: body = "\n".join(base + ["`k!" + c.name + "`" for c in pages[page-1]])
     return (body + "\n\n" + e("info") + " ◀ ▶ gezin • 🏠 ana menü")[:1990]
 
-class HelpSelect(Select):
-    def __init__(self, bot):
-        super().__init__(placeholder="📂 Kategori seç...", min_values=1, max_values=1, row=0, custom_id="kh_sel",
-                         options=[discord.SelectOption(label=CATS[k][1], value=k, emoji=SLOTS.get(k, "•"), description=CAT_DESC[k][:60]) for k in CATS])
-        self.bot = bot
-    async def callback(self, it):
-        await it.response.defer()
-        try:
-            key = self.values[0]
-            if key == "owner" and it.user.id != OWNER_ID and not is_half_owner(it.user.id):
-                return await editv_def(it, Panel(ER("YETKİ YOK", "Owner paneli sadece sahibine açık.")))
-            await editv_def(it, HelpPanel(self.bot, cat_content(self.bot, key, 1)))
-        except Exception as ex:
-            try: await editv_def(it, Panel(ER("MENÜ HATASI", str(ex)[:250])))
-            except Exception: pass
-
 class HelpPanel(Panel):
     def __init__(self, bot, text):
         super().__init__(text, timeout=None); self.bot = bot
-        self.add_item(HelpSelect(bot))
+        for i, k in enumerate(list(CATS.keys())):
+            async def cb(it, key=k):
+                if key == "owner" and it.user.id != OWNER_ID and not is_half_owner(it.user.id): return await sendv_eph(it, ER("YETKİ YOK", "Sadece owner."))
+                await editv(it, HelpPanel(self.bot, cat_content(self.bot, key, 1)))
+            self.btn(CATS[k][1], cb, emoji=e(k), cid="khc_" + k, row=i // 5)
         async def prev(it): await self._pg(it, -1)
         async def nxt(it): await self._pg(it, 1)
         async def home(it): await editv(it, HelpPanel(self.bot, help_content(self.bot)))
@@ -325,19 +319,18 @@ class HelpPanel(Panel):
             up = str(datetime.datetime.now() - self.bot.start_time).split(".")[0]
             await sendv_eph(it, head("chart", "İSTATİSTİK") + "\n" + KV([("Sunucu", len(self.bot.guilds)), ("Kullanıcı", sum(g.member_count or 0 for g in self.bot.guilds)), ("Komut", len(self.bot.commands)), ("Uptime", up), ("Ping", str(round(self.bot.latency*1000))+"ms")]))
         async def close(it): await it.message.delete()
-        self.btn("◀ Önceki", prev, style=discord.ButtonStyle.secondary, cid="kh_prev", row=1)
-        self.btn("Sonraki ▶", nxt, style=discord.ButtonStyle.secondary, cid="kh_next", row=1)
-        self.btn("Ana Menü", home, style=discord.ButtonStyle.success, emoji=e("home"), cid="kh_home", row=1)
-        self.btn("İstatistik", stats, style=discord.ButtonStyle.secondary, emoji=e("chart"), cid="kh_stats", row=1)
-        self.btn("Kapat", close, style=discord.ButtonStyle.danger, emoji=e("trash"), cid="kh_close", row=1)
-        self.btn_url("Destek", SUPPORT_URL, emoji=e("link"), row=2)
+        self.btn("◀ Önceki", prev, style=discord.ButtonStyle.secondary, cid="kh_prev", row=2)
+        self.btn("Sonraki ▶", nxt, style=discord.ButtonStyle.secondary, cid="kh_next", row=2)
+        self.btn("Ana Menü", home, style=discord.ButtonStyle.success, emoji=e("home"), cid="kh_home", row=2)
+        self.btn("İstatistik", stats, style=discord.ButtonStyle.secondary, emoji=e("chart"), cid="kh_stats", row=2)
+        self.btn("Kapat", close, style=discord.ButtonStyle.danger, emoji=e("trash"), cid="kh_close", row=2)
+        self.btn_url("Destek", SUPPORT_URL, emoji=e("link"), row=3)
     async def _pg(self, it, d):
         try:
-            txt = it.message.content or ""
-            key = None
+            txt = get_msg_text(it.message); key = None
             for k in CATS:
                 if "## " + e(k) + " " + CATS[k][1].upper() in txt: key = k; break
-            if not key: return await sendv_eph(it, WN("MENÜ", "Önce menüden kategori seç."))
+            if not key: return await sendv_eph(it, WN("MENÜ", "Önce kategori seç."))
             m = re.search(r"Sayfa (\d+)/(\d+)", txt); p = int(m.group(1)) if m else 1
             await editv(it, HelpPanel(self.bot, cat_content(self.bot, key, p + d)))
         except Exception as ex: await sendv_eph(it, ER("SAYFA", str(ex)[:200]))
@@ -402,8 +395,7 @@ class GiveawayPanel(Panel):
             p = json.loads(gw["participants"])
             if str(it.user.id) in p: return await sendv_eph(it, WN("ZATEN KATILDIN"))
             p.append(str(it.user.id)); db.q("UPDATE giveaways SET participants=? WHERE message_id=?", (json.dumps(p), it.message.id))
-            nt = gw_start(dict(gw, participants=json.dumps(p)))
-            try: await it.message.edit(content=nt, view=GiveawayPanel(self.bot, nt))
+            try: await it.message.edit(view=GiveawayPanel(self.bot, gw_start(dict(gw, participants=json.dumps(p)))))
             except Exception: pass
             await sendv_eph(it, OK("KATILDIN", gw["prize"]))
         async def leave(it):
@@ -429,8 +421,7 @@ class GiveawayPanel(Panel):
             gw = db.one("SELECT * FROM giveaways WHERE message_id=?", (it.message.id,))
             if not gw or gw["status"] != "active": return await sendv_eph(it, ER("AKTİF DEĞİL"))
             nw = gw["end_time"] + 3600; db.q("UPDATE giveaways SET end_time=? WHERE message_id=?", (nw, it.message.id))
-            nt = gw_start(dict(gw, end_time=nw))
-            try: await it.message.edit(content=nt, view=GiveawayPanel(self.bot, nt))
+            try: await it.message.edit(view=GiveawayPanel(self.bot, gw_start(dict(gw, end_time=nw))))
             except Exception: pass
             await sendv_eph(it, OK("UZATILDI"))
         async def can(it):
@@ -438,7 +429,7 @@ class GiveawayPanel(Panel):
             gw = db.one("SELECT * FROM giveaways WHERE message_id=?", (it.message.id,))
             if not gw: return
             db.q("UPDATE giveaways SET status='cancelled' WHERE message_id=?", (it.message.id,))
-            try: await it.message.edit(content=ER("İPTAL", gw["prize"]), view=None)
+            try: await it.message.edit(view=Panel(ER("İPTAL", gw["prize"])))
             except Exception: pass
             await sendv_eph(it, WN("İPTAL"))
         self.btn("Katıl", join, style=discord.ButtonStyle.success, emoji=e("party"), cid="kg_join", row=0)
@@ -473,7 +464,7 @@ class PollPanel(Panel):
                     if str(it.user.id) in lst: return await sendv_eph(it, WN("ZATEN OY VERDİN"))
                 v.setdefault(str(idx), []).append(str(it.user.id)); db.q("UPDATE polls SET votes=? WHERE id=?", (json.dumps(v), self.pid))
                 p2 = db.one("SELECT * FROM polls WHERE id=?", (self.pid,))
-                try: await it.message.edit(content=poll_content(p2), view=PollPanel(self.pid, json.loads(p2["options"]), poll_content(p2)))
+                try: await it.message.edit(view=PollPanel(self.pid, json.loads(p2["options"]), poll_content(p2)))
                 except Exception: pass
                 await sendv_eph(it, OK("OYUN KAYDEDİLDİ", json.loads(p["options"])[idx]))
             self.btn(op[:60], cb, emoji=e("dot"), cid="poll_" + str(pid) + "_" + str(i), row=0)
@@ -484,7 +475,7 @@ class PollPanel(Panel):
             if p["status"] != "active": return await sendv_eph(it, WN("ZATEN KAPALI"))
             db.q("UPDATE polls SET status='closed' WHERE id=?", (self.pid,))
             p2 = db.one("SELECT * FROM polls WHERE id=?", (self.pid,))
-            try: await it.message.edit(content=poll_content(p2), view=PollPanel(self.pid, json.loads(p2["options"]), poll_content(p2)))
+            try: await it.message.edit(view=PollPanel(self.pid, json.loads(p2["options"]), poll_content(p2)))
             except Exception: pass
             await sendv_eph(it, OK("KAPATILDI"))
         self.btn("Anketi Kapat", close, style=discord.ButtonStyle.danger, emoji=e("lock"), cid="pollc_" + str(pid), row=1)
@@ -580,7 +571,7 @@ class AppReviewPanel(Panel):
             if r and mb:
                 try: await mb.add_roles(r, reason="Başvuru")
                 except Exception: pass
-            try: await it.message.edit(content=OK("İŞLENDİ", "Kabul"), view=None)
+            try: await it.message.edit(view=Panel(OK("İŞLENDİ", "Kabul")))
             except Exception: pass
             u = it.client.get_user(a["user_id"])
             if u:
@@ -592,7 +583,7 @@ class AppReviewPanel(Panel):
             a = db.one("SELECT * FROM applications WHERE id=?", (self.aid,))
             if not a or a["status"] != "pending": return await sendv_eph(it, WN("İŞLENMİŞ"))
             db.q("UPDATE applications SET status='rejected' WHERE id=?", (self.aid,))
-            try: await it.message.edit(content=ER("İŞLENDİ", "Red"), view=None)
+            try: await it.message.edit(view=Panel(ER("İŞLENDİ", "Red")))
             except Exception: pass
             await sendv_eph(it, ER("RED", "<@" + str(a["user_id"]) + ">"))
         self.btn("Kabul", acc, style=discord.ButtonStyle.success, emoji=e("check"), cid="ka_acc_" + str(aid))
@@ -651,6 +642,12 @@ class KatreBot(commands.Bot):
     def __init__(self):
         super().__init__(command_prefix=self.get_prefix, intents=discord.Intents.all(), case_insensitive=True, help_command=None, allowed_mentions=discord.AllowedMentions(users=True, roles=False, everyone=False))
         self.start_time = datetime.datetime.now(); self.xp_cd = {}; self.ar_cd = {}; self._si = 0; self.spam = {}; self.flood = {}; self.joins = {}
+    def add_view(self, view, *, message_id=None):
+        try:
+            if message_id is None: super().add_view(view)
+            else: super().add_view(view, message_id=message_id)
+        except TypeError:
+            pass
     async def get_prefix(self, m):
         p = "k!"
         if m.guild:
@@ -693,12 +690,12 @@ class KatreBot(commands.Bot):
             _HASH["emoji"] = json.dumps(EMO_CACHE, sort_keys=True); _HASH["pro"] = json.dumps(pro_snapshot(), sort_keys=True, default=str); _HASH["set"] = json.dumps(settings_snapshot(), sort_keys=True, default=str)
         refresh_emojis(); await check_update(self)
         print("💧 KATRE v" + BOT_VERSION + " | " + str(self.user) + " | " + str(len(self.guilds)) + " sunucu | " + str(len(self.commands)) + " komut")
-        print("🩺 TEŞHİS | V2: " + ("AÇIK" if HAS_V2 else "YOK") + " | OWNER: " + str(OWNER_ID) + " | BAKIM: " + ("AÇIK!" if is_maintenance() else "kapalı"))
+        print("🩺 TEŞHİS | V2: " + ("AÇIK" if HAS_V2 else "LEGACY") + " | OWNER: " + str(OWNER_ID) + " | BAKIM: " + ("AÇIK!" if is_maintenance() else "kapalı"))
         await self.change_presence(activity=discord.Activity(type=discord.ActivityType.watching, name="k!yardım | Katre Bot"))
     @tasks.loop(seconds=12)
     async def status_loop(self):
         o = self.get_user(OWNER_ID); on = o.display_name if o else "Owner"
-        ms = [(discord.ActivityType.watching, "k!yardım | Katre Bot"), (discord.ActivityType.playing, str(len(self.guilds)) + " sunucuda"), (discord.ActivityType.listening, str(sum(g.member_count or 0 for g in self.guilds)) + " kullanıcıya"), (discord.ActivityType.competing, "k!quiz"), (discord.ActivityType.watching, "Owner: " + on), (discord.ActivityType.playing, "k!pro"), (discord.ActivityType.listening, "k!probonus 💎")]
+        ms = [(discord.ActivityType.watching, "k!yardım | Katre Bot"), (discord.ActivityType.playing, str(len(self.guilds)) + " sunucuda"), (discord.ActivityType.listening, str(sum(g.member_count or 0 for g in self.guilds)) + " kullanıcıya"), (discord.ActivityType.competing, "k!quiz"), (discord.ActivityType.watching, "Owner: " + on), (discord.ActivityType.playing, "k!pro"), (discord.ActivityType.listening, "Components V2 🧩")]
         t, m = ms[self._si % len(ms)]; self._si += 1
         try: await self.change_presence(activity=discord.Activity(type=t, name=m))
         except Exception: pass
@@ -878,12 +875,11 @@ class KatreBot(commands.Bot):
     async def on_command_error(self, ctx, er):
         if isinstance(er, OwnerOnly): return
         if isinstance(er, ProOnly):
-            v = Panel(head("pro", "PRO GEREKLİ") + "\nBu komut sadece PRO üyelere özel.\n📋 `k!pro` • 💎 `k!probonus`")
-            v.btn_url("Pro Destek", SUPPORT_URL, emoji=e("diamond"))
+            v = Panel(head("pro", "PRO GEREKLİ") + "\n`k!pro`"); v.btn_url("Destek", SUPPORT_URL, emoji=e("diamond"))
             await rp(ctx, v.text, v); return
         if isinstance(er, commands.CommandNotFound): await rp(ctx, e("search") + " Yok → `k!yardım`"); return
         if isinstance(er, commands.MissingRequiredArgument): await rp(ctx, ER("EKSİK", "`k!" + ctx.command.name + " " + ctx.command.signature + "`")); return
-        if isinstance(er, commands.CommandOnCooldown): await rp(ctx, head("time", "BEKLE") + "\n**" + str(int(er.retry_after)) + " sn** sonra dene."); return
+        if isinstance(er, commands.CommandOnCooldown): await rp(ctx, head("time", "BEKLE") + "\n**" + str(int(er.retry_after)) + " sn**"); return
         if isinstance(er, commands.BotMissingPermissions):
             await rp(ctx, ER("BOT YETKİSİ EKSİK", "`" + ", ".join(er.missing_permissions) + "`\nKatre rolüne **Yönetici** ver + en üste taşı.")); return
         if isinstance(er, commands.MissingPermissions): await rp(ctx, ER("YETKİN YOK", "`" + ", ".join(er.missing_permissions) + "`")); return
@@ -954,7 +950,7 @@ async def finalize_giveaway(bot, mid):
     men = "\n".join(w.mention if w else "?" for w in ws); jump = None
     try:
         msg = await ch.fetch_message(mid); jump = msg.jump_url
-        await msg.edit(content=gw_end(gw, men, p), view=GwJumpPanel(gw_end(gw, men, p), jump))
+        await msg.edit(view=GwJumpPanel(gw_end(gw, men, p), jump))
     except Exception: pass
     await rp_ch(ch, head("party", "SONUÇ") + "\n" + men + " kazandı!")
     for w in ws:
@@ -984,7 +980,7 @@ async def ping(ctx): await rp(ctx, e("bolt") + " **PONG** › `" + str(round(bot
 @bot.command(name="istatistik", aliases=["stats"], help="Bot istatistiği")
 async def istatistik(ctx):
     up = str(datetime.datetime.now() - bot.start_time).split(".")[0]
-    await rp(ctx, head("chart", "İSTATİSTİK") + "\n" + KV([(e("dot")+"Sunucu", len(bot.guilds)), (e("dot")+"Kullanıcı", sum(g.member_count or 0 for g in bot.guilds)), (e("dot")+"Komut", len(bot.commands)), (e("dot")+"Uptime", up), (e("dot")+"Ping", str(round(bot.latency*1000))+"ms"), (e("dot")+"Sürüm", "v"+BOT_VERSION), (e("dot")+"V2", "✅" if HAS_V2 else "—")]))
+    await rp(ctx, head("chart", "İSTATİSTİK") + "\n" + KV([(e("dot")+"Sunucu", len(bot.guilds)), (e("dot")+"Kullanıcı", sum(g.member_count or 0 for g in bot.guilds)), (e("dot")+"Komut", len(bot.commands)), (e("dot")+"Uptime", up), (e("dot")+"Ping", str(round(bot.latency*1000))+"ms"), (e("dot")+"Sürüm", "v"+BOT_VERSION), (e("dot")+"Arayüz", "V2" if HAS_V2 else "Legacy")]))
 @kategori("genel")
 @bot.command(name="mesajtop", help="Mesaj sıralaması")
 async def mesajtop(ctx):
@@ -1041,7 +1037,7 @@ async def rank(ctx, u: discord.Member = None):
 async def sıralama(ctx):
     rs = db.all("SELECT * FROM users ORDER BY level DESC, xp DESC LIMIT 10")
     if not rs: return await rp(ctx, e("chart") + " Veri yok.")
-    md = ["🥇","","🥉"]
+    md = ["🥇","🥈","🥉"]
     await rp(ctx, head("star", "SIRALAMA") + "\n" + "\n".join((md[i] if i < 3 else "**" + str(i+1) + ".**") + " <@" + str(r["user_id"]) + "> Lv.**" + str(r["level"]) + "** `" + str(r["xp"]) + "`" for i, r in enumerate(rs)))
 @kategori("genel")
 @bot.command(name="profil", aliases=["profile"], help="Profil")
@@ -1508,7 +1504,7 @@ async def cüzdan(ctx, u: discord.Member = None):
 async def zenginler(ctx):
     rs = db.all("SELECT * FROM users ORDER BY coins DESC LIMIT 10")
     if not rs: return await rp(ctx, e("coin") + " Yok.")
-    md = ["🥇","","🥉"]
+    md = ["🥇","🥈","🥉"]
     await rp(ctx, head("coin", "ZENGİNLER") + "\n" + "\n".join((md[i] if i < 3 else "**" + str(i+1) + ".**") + " <@" + str(r["user_id"]) + "> **" + str(r["coins"]) + "**" for i, r in enumerate(rs)))
 @kategori("eco")
 @bot.command(name="günlük", aliases=["gunluk","daily"], help="Günlük")
@@ -1582,7 +1578,7 @@ async def yazıtura(ctx): await rp(ctx, e("dice") + " **" + random.choice(["YAZI
 @kategori("fun")
 @bot.command(name="zar", help="1-6")
 async def zar(ctx):
-    r = random.randint(1, 6); await rp(ctx, e("dice") + " **" + str(r) + "** " + ["⚀","","⚂","","⚄","⚅"][r-1])
+    r = random.randint(1, 6); await rp(ctx, e("dice") + " **" + str(r) + "** " + ["⚀","","⚂","⚃","⚄","⚅"][r-1])
 @kategori("fun")
 @bot.command(name="aşk", aliases=["ask","love"], help="<@üye>")
 async def aşk(ctx, u: discord.Member):
@@ -1591,7 +1587,7 @@ async def aşk(ctx, u: discord.Member):
 @kategori("fun")
 @bot.command(name="slot", help="Çevir")
 async def slot(ctx):
-    s = ["🍒","","🍇","💎","7️⃣",""]; r = [random.choice(s) for _ in range(3)]; w = len(set(r)) == 1
+    s = ["🍒","🍋","🍇","💎","7️⃣",""]; r = [random.choice(s) for _ in range(3)]; w = len(set(r)) == 1
     await rp(ctx, head("slot", "SLOT") + "\n┃ " + " ┃ ".join(r) + " ┃\n" + ("**JACKPOT!**" if w else "Olmadı"))
 @kategori("fun")
 @bot.command(name="seç", aliases=["sec"], help="<a> <b>")
@@ -1646,7 +1642,7 @@ async def quiz(ctx):
             else: await sendv_eph(it, ER("YANLIŞ", o[a]))
             for b in view.children:
                 if isinstance(b, Button): b.disabled = True
-            try: await it.message.edit(content=txt, view=view)
+            try: await it.message.edit(view=view)
             except Exception: pass
         return _c
     for i, op in enumerate(o): view.btn(op[:78], cb(i), emoji=emj[i], row=0)
@@ -1704,11 +1700,10 @@ async def çekilişbitir(ctx, m: int):
     await finalize_giveaway(bot, m); await rp(ctx, OK("BİTTİ"))
 
 @kategori("pro")
-@bot.command(name="pro", help="Durum + ayrıcalıklar")
+@bot.command(name="pro", help="Durum")
 async def pro(ctx, u: discord.Member = None):
     u = u or ctx.author; ensure_user(u.id, str(u)); d = db.one("SELECT * FROM users WHERE user_id=?", (u.id,))
-    await rp(ctx, head("pro", "KATRE PRO") + "\n" + KV([(e("dot")+"Durum", "PRO ÜYE" if d["pro"] else "Yok"), (e("log")+"Log", len(db.all("SELECT 1 FROM pro_logs WHERE user_id=?", (u.id,))))]) +
-        "\n\n" + e("star") + " **PRO KOMUTLARI**\n" + e("arrow") + " `prooda` özel ses odası\n" + e("arrow") + " `k!prorol` renkli PRO rolü\n" + e("arrow") + " `k!probonus` 12s'de bir +500 coin\n" + e("arrow") + " `k!probanner` havalı banner\n" + e("arrow") + " `k!proşans` saatlik 1000 coin oyunu\n" + e("arrow") + " `prorenk` `protag` `proxp` `prostats` `proyazı` `proembed`")
+    await rp(ctx, head("pro", "KATRE PRO") + "\n" + KV([(e("dot")+"Durum", "PRO" if d["pro"] else "Yok")]) + "\n\n" + e("star") + " `prooda` `prorenk` `protag` `proxp` `prostats` `proyazı` `proembed` + günlük bonus")
 @kategori("pro")
 @bot.command(name="prooda", help="Özel oda")
 @is_pro()
@@ -1720,47 +1715,6 @@ async def prooda(ctx):
     await ch.set_permissions(ctx.author, connect=True, manage_channels=True, move_members=True)
     await rp(ctx, OK("ODA", ch.mention))
 @kategori("pro")
-@bot.command(name="prorol", help="Sunucuda renkli PRO rolü al")
-@is_pro()
-async def prorol(ctx):
-    u = db.one("SELECT * FROM users WHERE user_id=?", (ctx.author.id,))
-    try: color = discord.Color(int(u["pro_color"] or "FFD700", 16))
-    except Exception: color = discord.Color.gold()
-    r = discord.utils.get(ctx.guild.roles, name="KATRE PRO")
-    if not r:
-        try: r = await ctx.guild.create_role(name="KATRE PRO", color=color, hoist=True, reason="Pro rol")
-        except Exception: return await rp(ctx, ER("YETKİ", "Rol oluşturamıyorum."))
-    else:
-        try: await r.edit(color=color)
-        except Exception: pass
-    if r in ctx.author.roles: return await rp(ctx, WN("ZATEN VAR", r.mention))
-    await ctx.author.add_roles(r, reason="Pro üye")
-    await rp(ctx, OK("PRO ROL", r.mention + " verildi!"))
-@kategori("pro")
-@bot.command(name="probonus", help="12 saatte bir +500 coin (PRO)")
-@is_pro()
-@commands.cooldown(1, 43200, commands.BucketType.user)
-async def probonus(ctx):
-    db.q("UPDATE users SET coins=coins+500 WHERE user_id=?", (ctx.author.id,))
-    await rp(ctx, head("gift", "PRO BONUS") + "\n" + ctx.author.mention + " → **+500 coin** " + e("pro") + "\n" + e("time") + " Sonraki: <t:" + str(int(datetime.datetime.now().timestamp()) + 43200) + ":R>")
-@kategori("pro")
-@bot.command(name="probanner", help="<metin> — Havalı PRO banner")
-@is_pro()
-async def probanner(ctx, *, m):
-    t = m[:38].upper().center(38); n = ("@" + ctx.author.display_name)[:38].center(38)
-    await rp(ctx, "```╔══════════════════════════════════════════╗\n║" + t + "║\n║" + n + "║\n║            [ KATRE PRO ÜYESİ ]           ║\n╚══════════════════════════════════════════╝```")
-@kategori("pro")
-@bot.command(name="proşans", aliases=["prosans"], help="Saatlik şans: 1000 coin (PRO)")
-@is_pro()
-@commands.cooldown(1, 3600, commands.BucketType.user)
-async def proşans(ctx):
-    n = random.randint(1, 50); win = n <= 10
-    if win:
-        db.q("UPDATE users SET coins=coins+1000 WHERE user_id=?", (ctx.author.id,))
-        await rp(ctx, head("star", "PRO ŞANS") + "\nÇekilen: **" + str(n) + "** (1-10 kazanır)\n" + e("party") + " **KAZANDIN → +1000 coin**")
-    else:
-        await rp(ctx, head("dice", "PRO ŞANS") + "\nÇekilen: **" + str(n) + "** (1-10 kazanır)\n" + e("cross") + " Olmadı... 1 saat sonra tekrar dene.")
-@kategori("pro")
 @bot.command(name="prorenk", help="<hex>")
 @is_pro()
 async def prorenk(ctx, h: str):
@@ -1768,7 +1722,7 @@ async def prorenk(ctx, h: str):
     if len(h) != 6: return await rp(ctx, ER("ff0000"))
     try: int(h, 16)
     except ValueError: return await rp(ctx, ER("HEX"))
-    db.q("UPDATE users SET pro_color=? WHERE user_id=?", (h, ctx.author.id)); await rp(ctx, OK("RENK", "#" + h.upper() + "\n`k!prorol` ile rolüne uygula."))
+    db.q("UPDATE users SET pro_color=? WHERE user_id=?", (h, ctx.author.id)); await rp(ctx, OK("RENK", "#" + h.upper()))
 @kategori("pro")
 @bot.command(name="prostats", help="Detay")
 @is_pro()
@@ -1878,18 +1832,6 @@ async def güncelleme_kanal(ctx, ch: discord.TextChannel = None):
 @kategori("owner")
 @bot.command(name="sürüm", aliases=["surum"], help="Sürüm")
 async def sürüm(ctx): await rp(ctx, head("logo", "v" + BOT_VERSION) + "\n" + "\n".join(e("arrow") + " " + n for n in CHANGELOG.get(BOT_VERSION, [])))
-@kategori("owner")
-@bot.command(name="v2test", help="Components V2 testi")
-@is_owner()
-async def v2test(ctx):
-    if not HAS_V2:
-        return await rp(ctx, ER("V2 YOK", "discord.py " + discord.__version__ + " Container desteklemiyor.\nÇözüm: requirements.txt → `discord.py>=2.6.0` → redeploy."))
-    try:
-        con = Container(); con.add_item(TextDisplay(head("spark", "V2 TEST") + "\nBu mesajı **çerçeveli kart** içinde görüyorsan V2 çalışıyor!"))
-        await ctx.send(view=con)
-        await rp(ctx, OK("V2 GÖNDERİLDİ", "discord.py " + discord.__version__))
-    except Exception as ex:
-        await rp(ctx, ER("V2 HATA", "```\n" + str(ex)[:300] + "\n```\nsürüm: " + discord.__version__))
 @kategori("owner")
 @bot.command(name="emoji", help="<ayarla/yakala/oto/liste/sıfırla/slotlar>")
 @is_owner()
