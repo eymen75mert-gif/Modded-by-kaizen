@@ -1,5 +1,5 @@
 # ═══════════════════════════════════════════════════════════════════
-#  💧 KATRE BOT v5.1 — BÖLÜM 1/2 • V2 YARDIM • GÜZEL CEVAP • KELİME OYUNU
+#  💧 KATRE BOT v5.2 — BÖLÜM 1/2 • AÇIKLAYICI BAŞARILI/Başarısız CEVAPLAR
 #  ENV: BOT_TOKEN, OWNER_ID, SUPPORT_URL, BACKUP_CHANNEL_ID
 #  requirements.txt: discord.py>=2.6.0
 # ═══════════════════════════════════════════════════════════════════
@@ -26,8 +26,8 @@ BACKUP_CH = int(os.getenv("BACKUP_CHANNEL_ID", "0"))
 MARKER = "#KATRE_YEDEK"
 DIV = "──────────────────────────────"
 PAGE_SIZE = 15
-BOT_VERSION = "5.1"
-CHANGELOG = {"5.1": ["🧩 k!yardım artık V2 kart (select+butonlar kart içinde)", "🎨 Komut cevapları temiz kompakt tasarım", "📖 YENİ OYUN: Kelime Türetme (k!kelimekur) — ✅ onay tikli"]}
+BOT_VERSION = "5.2"
+CHANGELOG = {"5.2": ["🎨 Tüm komut cevapları Başarılı/Başarısız/Uyarı başlıklı alıntı kartı", "📝 Açıklayıcı metinler: kim/ne/sebep/süre", "🧩 k!yardım V2'ye zorlandı + k!v2test hata raporu"]}
 
 class DB:
     def __init__(self, path):
@@ -83,12 +83,12 @@ def is_half_owner(u): return db.one("SELECT 1 FROM half_owners WHERE user_id=?",
 def is_maintenance():
     r = db.one("SELECT maintenance FROM owner_settings WHERE id=1"); return bool(r and r["maintenance"])
 def mod_guard(ctx, t, v):
-    if t.id == ctx.author.id: return "Kendini " + v + " edemezsin!"
-    if t.id == OWNER_ID: return "Bot sahibine işlem yapamazsın!"
-    if is_half_owner(t.id): return "Half Owner'a işlem yapamazsın!"
-    if t.id == ctx.bot.user.id: return "Bota işlem yapamazsın!"
-    if t.id == ctx.guild.owner_id: return "Sunucu sahibine işlem yapamazsın!"
-    if ctx.author.top_role <= t.top_role: return "Aynı/üst yetkiliye işlem yapamazsın!"
+    if t.id == ctx.author.id: return "Bu işlemi kendine uygulayamazsın."
+    if t.id == OWNER_ID: return "Bot sahibine moderasyon uygulanamaz."
+    if is_half_owner(t.id): return "Half Owner hesabına işlem yapılamaz."
+    if t.id == ctx.bot.user.id: return "Bota kendi üzerinden işlem yapamazsın."
+    if t.id == ctx.guild.owner_id: return "Sunucu sahibine işlem yapamazsın."
+    if ctx.author.top_role <= t.top_role: return "Hedef seninle aynı veya üst yetki seviyesinde."
     return None
 
 SLOTS = {"logo":"💧","check":"✅","cross":"❌","warn":"⚠️","info":"ℹ️","dot":"•","arrow":"»","star":"🌟","spark":"✨","crown":"👑","diamond":"💎","coin":"🪙","money":"💰","gift":"🎁","party":"🎉","shield":"🛡️","hammer":"🔨","kick":"👢","lock":"🔒","unlock":"🔓","gear":"⚙️","chart":"📊","chartup":"📈","heart":"❤️","broken":"💔","ring":"💍","game":"🎮","dice":"🎲","slot":"🎰","fish":"🎣","pick":"⛏️","ticket":"🎫","clip":"📋","pen":"📝","cam":"📸","sleep":"😴","wave":"👋","cake":"🎂","alarm":"⏰","fire":"🔥","bolt":"⚡","mic":"🎙️","palette":"🎨","tag":"🏷️","robot":"🤖","target":"🎯","log":"📜","search":"🔍","time":"⏳","home":"🏠","trash":"🗑️","link":"🔗","genel":"🌐","mod":"🛡️","sys":"📋","eco":"💰","fun":"🎮","give":"🎉","pro":"💎","owner":"👑"}
@@ -164,13 +164,15 @@ async def pull_backup(bot, kind):
         traceback.print_exc(); return None
 
 # ═══════════════════════════════════════════════════════════════════
-# 🎨 TEMİZ MESAJ TASARIMI + V2 ZİNCİRİ
+# 🎨 MESAJ TASARIMI: Alıntı kartı + Başarılı/Başarısız/Uyarı başlıkları
 # ═══════════════════════════════════════════════════════════════════
-def head(i, t): return e(i) + " **" + t + "**\n" + DIV
-def OK(t, b=None): return head("check", t) + ("\n\n" + b if b else "")
-def ER(t, b=None): return head("cross", t) + ("\n\n" + b if b else "")
-def WN(t, b=None): return head("warn", t) + ("\n\n" + b if b else "")
-def KV(ps): return "\n".join("> " + k + " › **" + str(v) + "**" for k, v in ps)
+def _q(s): return "\n".join("> " + l for l in str(s).split("\n"))
+def head(i, t): return _q(e(i) + " **" + t + "**\n" + DIV)
+def OK(t, b=None): return head("check", "BAŞARILI › " + t) + ("\n" + _q(b) if b else "")
+def ER(t, b=None): return head("cross", "BAŞARISIZ › " + t) + ("\n" + _q(b) if b else "")
+def WN(t, b=None): return head("warn", "UYARI › " + t) + ("\n" + _q(b) if b else "")
+def INFO(t, b=None): return head("info", "BİLGİ › " + t) + ("\n" + _q(b) if b else "")
+def KV(ps): return _q("\n".join(k + " › **" + str(v) + "**" for k, v in ps))
 def bar(p, ln=14):
     p = max(0, min(100, int(p))); f = round(p / 100 * ln); return "`[" + "█" * f + "░" * (ln - f) + "] %" + str(p) + "`"
 def parse_sure(t):
@@ -320,7 +322,7 @@ def cat_content(bot, key, page=1):
     if len(body) > 1900: body = "\n".join(base + ["`k!" + c.name + "`" for c in pages[page-1]])
     return (body + "\n\n" + e("info") + " ◀ ▶ gezin • 🏠 ana menü")[:1990]
 
-# ─────────────── 🧩 V2 YARDIM KARTI (LayoutView + Container) ───────────────
+# ─────────────── 🧩 V2 YARDIM KARTI ───────────────
 async def _pg2(bot, it, d):
     try:
         txt = get_msg_text(it.message); key = None
@@ -333,7 +335,6 @@ async def _pg2(bot, it, d):
         await sendv_eph(it, ER("SAYFA", str(ex)[:200]))
 
 def help_v2(bot, text):
-    """🧩 V2 yardım kartı: TextDisplay + Select + Butonlar tek Container içinde"""
     lv = LayoutView(timeout=None)
     con = Container()
     con.add_item(TextDisplay(text))
@@ -343,7 +344,7 @@ def help_v2(bot, text):
         await it.response.defer()
         key = it.values[0]
         if key == "owner" and it.user.id != OWNER_ID and not is_half_owner(it.user.id):
-            return await it.edit_original_response(view=help_v2(bot, ER("YETKİ YOK", "Owner paneli sadece sahibine açık.")))
+            return await it.edit_original_response(view=help_v2(bot, ER("YETKİ YOK", "Owner paneli sadece sahibine açıktır.")))
         await it.edit_original_response(view=help_v2(bot, cat_content(bot, key, 1)))
     sel.callback = sel_cb
     con.add_item(sel)
@@ -373,7 +374,7 @@ class HelpSelect(Select):
         try:
             key = self.values[0]
             if key == "owner" and it.user.id != OWNER_ID and not is_half_owner(it.user.id):
-                return await editv_def(it, Panel(ER("YETKİ YOK", "Owner paneli sadece sahibine açık.")))
+                return await editv_def(it, Panel(ER("YETKİ YOK", "Owner paneli sadece sahibine açıktır.")))
             await editv_def(it, HelpPanel(self.bot, cat_content(self.bot, key, 1)))
         except Exception as ex:
             try: await editv_def(it, Panel(ER("MENÜ HATASI", str(ex)[:250])))
@@ -411,9 +412,9 @@ class ConfirmPanel(Panel):
     def __init__(self, text, t=30):
         super().__init__(text, timeout=t); self.value = None
         async def y(it):
-            self.value = True; self.stop(); await editv(it, Panel(WN("İŞLENİYOR...", "Bekle.")))
+            self.value = True; self.stop(); await editv(it, Panel(WN("İŞLENİYOR...", "Lütfen bekle.")))
         async def n(it):
-            self.value = False; self.stop(); await editv(it, Panel(ER("İPTAL")))
+            self.value = False; self.stop(); await editv(it, Panel(ER("İPTAL EDİLDİ", "İşlem kullanıcı tarafından iptal edildi.")))
         self.btn("Onayla", y, style=discord.ButtonStyle.success, emoji=e("check"))
         self.btn("Vazgeç", n, style=discord.ButtonStyle.secondary, emoji=e("cross"))
 
@@ -421,19 +422,19 @@ class OwnerPanel(Panel):
     def __init__(self, bot, text):
         super().__init__(text, timeout=None); self.bot = bot
         async def g(it):
-            if it.user.id != OWNER_ID: await sendv_eph(it, ER("YETKİ YOK")); return False
+            if it.user.id != OWNER_ID: await sendv_eph(it, ER("YETKİ YOK", "Bu panel sadece bot sahibinedir.")); return False
             return True
         async def bk(it):
             if not await g(it): return
             cur = db.one("SELECT maintenance FROM owner_settings WHERE id=1")["maintenance"]
             db.q("UPDATE owner_settings SET maintenance=? WHERE id=1", (0 if cur else 1,))
-            await sendv_eph(it, head("gear", "BAKIM") + "\n**" + ("AÇIK" if not cur else "KAPALI") + "**")
+            await sendv_eph(it, head("gear", "BAKIM MODU") + "\n" + ("Artık **AÇIK**: normal kullanıcılar komut kullanamaz." if not cur else "Artık **KAPALI**: herkes komut kullanabilir."))
         async def st(it):
             if not await g(it): return
-            await sendv_eph(it, head("chart", "OWNER") + "\n" + KV([("Sunucu", len(self.bot.guilds)), ("Pro", len(db.all("SELECT 1 FROM users WHERE pro=1"))), ("Half", len(db.all("SELECT 1 FROM half_owners"))), ("Bakım", "AÇIK" if is_maintenance() else "KAPALI")]))
+            await sendv_eph(it, head("chart", "OWNER İSTATİSTİK") + "\n" + KV([("Sunucu", len(self.bot.guilds)), ("Pro Üye", len(db.all("SELECT 1 FROM users WHERE pro=1"))), ("Half Owner", len(db.all("SELECT 1 FROM half_owners"))), ("Bakım", "AÇIK" if is_maintenance() else "KAPALI")]))
         async def gl(it):
             if not await g(it): return
-            await sendv_eph(it, head("owner", "SUNUCULAR") + "\n" + "\n".join(e("arrow") + " **" + x.name + "** " + str(x.member_count) for x in sorted(self.bot.guilds, key=lambda y: -(y.member_count or 0))[:10]))
+            await sendv_eph(it, head("owner", "SUNUCULAR") + "\n" + "\n".join(e("arrow") + " **" + x.name + "** ─ " + str(x.member_count) + " üye" for x in sorted(self.bot.guilds, key=lambda y: -(y.member_count or 0))[:10]))
         async def dy(it):
             if await g(it): await it.response.send_modal(BroadcastModal())
         async def cl(it):
@@ -452,60 +453,60 @@ class BroadcastModal(Modal, title="Genel Duyuru"):
             if ch:
                 try: await rp_ch(ch, head("owner", "DUYURU") + "\n" + self.txt.value); ok += 1
                 except Exception: pass
-        await it.response.send_message(OK("DUYURU", str(ok) + "/" + str(len(it.client.guilds))), ephemeral=True)
+        await it.response.send_message(OK("DUYURU GÖNDERİLDİ", str(ok) + "/" + str(len(it.client.guilds)) + " sunucuya ulaşıldı."), ephemeral=True)
 
 def gw_start(gw):
-    return ("## " + e("give") + " ÇEKİLİŞ: " + gw["prize"] + "\n" + DIV + "\n" + KV([(e("star")+"Kazanan", str(gw["winners"]) + " kişi"), (e("dot")+"Katılım", str(len(json.loads(gw["participants"]))) + " kişi"), (e("time")+"Bitiş", "<t:" + str(int(gw["end_time"])) + ":R>"), (e("dot")+"Düzenleyen", "<@" + str(gw["host"]) + ">")]) + "\n\n" + e("spark") + " **KATIL** butonuna bas!")
+    return ("## " + e("give") + " ÇEKİLİŞ: " + gw["prize"] + "\n" + DIV + "\n" + KV([(e("star")+"Kazanan Sayısı", str(gw["winners"]) + " kişi"), (e("dot")+"Katılım", str(len(json.loads(gw["participants"]))) + " kişi"), (e("time")+"Bitiş", "<t:" + str(int(gw["end_time"])) + ":R>"), (e("dot")+"Düzenleyen", "<@" + str(gw["host"]) + ">")]) + "\n\n" + e("spark") + " **KATIL** butonuna basarak çekilişe dahil olabilirsin!")
 def gw_end(gw, men, parts):
-    return ("## " + e("star") + " " + gw["prize"] + "\n" + DIV + "\n**ÇEKİLİŞ BİTTİ**\n\n" + KV([(e("star")+"Kazanan", men), (e("dot")+"Katılım", str(len(parts)) + " kişi"), (e("dot")+"Düzenleyen", "<@" + str(gw["host"]) + ">"), (e("alarm")+"Bitti", "<t:" + str(int(datetime.datetime.now().timestamp())) + ":F>")]) + "\n\n" + e("party") + " Kazananlar duyuruda.")
+    return ("## " + e("star") + " " + gw["prize"] + "\n" + DIV + "\n**ÇEKİLİŞ SONA ERDİ**\n\n" + KV([(e("star")+"Kazanan(lar)", men), (e("dot")+"Toplam Katılım", str(len(parts)) + " kişi"), (e("dot")+"Düzenleyen", "<@" + str(gw["host"]) + ">"), (e("alarm")+"Bitiş Zamanı", "<t:" + str(int(datetime.datetime.now().timestamp())) + ":F>")]) + "\n\n" + e("party") + " Kazananlara DM'den de haber verildi.")
 class GiveawayPanel(Panel):
     def __init__(self, bot, text):
         super().__init__(text, timeout=None); self.bot = bot
         async def join(it):
             gw = db.one("SELECT * FROM giveaways WHERE message_id=?", (it.message.id,))
-            if not gw or gw["status"] != "active": return await sendv_eph(it, ER("AKTİF DEĞİL"))
+            if not gw or gw["status"] != "active": return await sendv_eph(it, ER("AKTİF DEĞİL", "Bu çekiliş sona ermiş veya iptal edilmiş."))
             p = json.loads(gw["participants"])
-            if str(it.user.id) in p: return await sendv_eph(it, WN("ZATEN KATILDIN"))
+            if str(it.user.id) in p: return await sendv_eph(it, WN("ZATEN KATILDIN", "Tekrar katılım gerekmiyor."))
             p.append(str(it.user.id)); db.q("UPDATE giveaways SET participants=? WHERE message_id=?", (json.dumps(p), it.message.id))
             nt = gw_start(dict(gw, participants=json.dumps(p)))
             try: await it.message.edit(content=nt, view=GiveawayPanel(self.bot, nt))
             except Exception: pass
-            await sendv_eph(it, OK("KATILDIN", gw["prize"]))
+            await sendv_eph(it, OK("KATILDIN", "**" + gw["prize"] + "** çekilişine başarıyla katıldın!\n" + str(len(p)) + " kişi arasında yarışacaksın."))
         async def leave(it):
             gw = db.one("SELECT * FROM giveaways WHERE message_id=?", (it.message.id,))
-            if not gw or gw["status"] != "active": return await sendv_eph(it, ER("AKTİF DEĞİL"))
+            if not gw or gw["status"] != "active": return await sendv_eph(it, ER("AKTİF DEĞİL", "Çekiliş zaten kapanmış."))
             p = json.loads(gw["participants"])
-            if str(it.user.id) not in p: return await sendv_eph(it, WN("KATILMAMIŞSIN"))
+            if str(it.user.id) not in p: return await sendv_eph(it, WN("KATILMAMIŞSIN", "Bu çekilişe henüz katılmadın."))
             p.remove(str(it.user.id)); db.q("UPDATE giveaways SET participants=? WHERE message_id=?", (json.dumps(p), it.message.id))
-            await sendv_eph(it, WN("AYRILDIN"))
+            await sendv_eph(it, WN("AYRILDIN", "Çekilişten çıkarıldın; tekrar katılabilirsin."))
         async def end(it):
-            if not it.user.guild_permissions.administrator: return await sendv_eph(it, ER("YETKİ YOK"))
-            await finalize_giveaway(self.bot, it.message.id); await sendv_eph(it, OK("BİTİRİLDİ"))
+            if not it.user.guild_permissions.administrator: return await sendv_eph(it, ER("YETKİ YOK", "Sadece yönetici bitirebilir."))
+            await finalize_giveaway(self.bot, it.message.id); await sendv_eph(it, OK("BİTİRİLDİ", "Çekiliş sonlandırıldı, kazananlar belirlendi."))
         async def rr(it):
-            if not it.user.guild_permissions.administrator: return await sendv_eph(it, ER("YETKİ YOK"))
+            if not it.user.guild_permissions.administrator: return await sendv_eph(it, ER("YETKİ YOK", "Sadece yönetici çekebilir."))
             gw = db.one("SELECT * FROM giveaways WHERE message_id=?", (it.message.id,))
             if not gw: return
             p = json.loads(gw["participants"])
-            if not p: return await sendv_eph(it, ER("KATILIMCI YOK"))
+            if not p: return await sendv_eph(it, ER("KATILIMCI YOK", "Hiç katılımcı olmadığı için yeniden çekim yapılamaz."))
             w = self.bot.get_user(int(random.choice(p)))
-            await rp_ch(it.channel, head("dice", "REROLL") + "\n" + (w.mention if w else "?")); await it.response.defer()
+            await rp_ch(it.channel, head("dice", "YENİDEN ÇEKİM") + "\nYeni kazanan: " + (w.mention if w else "?")); await it.response.defer()
         async def ext(it):
-            if not it.user.guild_permissions.administrator: return await sendv_eph(it, ER("YETKİ YOK"))
+            if not it.user.guild_permissions.administrator: return await sendv_eph(it, ER("YETKİ YOK", "Sadece yönetici uzatabilir."))
             gw = db.one("SELECT * FROM giveaways WHERE message_id=?", (it.message.id,))
-            if not gw or gw["status"] != "active": return await sendv_eph(it, ER("AKTİF DEĞİL"))
+            if not gw or gw["status"] != "active": return await sendv_eph(it, ER("AKTİF DEĞİL", "Bitmiş çekiliş uzatılamaz."))
             nw = gw["end_time"] + 3600; db.q("UPDATE giveaways SET end_time=? WHERE message_id=?", (nw, it.message.id))
             nt = gw_start(dict(gw, end_time=nw))
             try: await it.message.edit(content=nt, view=GiveawayPanel(self.bot, nt))
             except Exception: pass
-            await sendv_eph(it, OK("UZATILDI"))
+            await sendv_eph(it, OK("UZATILDI", "Çekiliş süresine **+1 saat** eklendi."))
         async def can(it):
-            if not it.user.guild_permissions.administrator: return await sendv_eph(it, ER("YETKİ YOK"))
+            if not it.user.guild_permissions.administrator: return await sendv_eph(it, ER("YETKİ YOK", "Sadece yönetici iptal edebilir."))
             gw = db.one("SELECT * FROM giveaways WHERE message_id=?", (it.message.id,))
             if not gw: return
             db.q("UPDATE giveaways SET status='cancelled' WHERE message_id=?", (it.message.id,))
-            try: await it.message.edit(content=ER("İPTAL", gw["prize"]), view=None)
+            try: await it.message.edit(content=ER("İPTAL", "**" + gw["prize"] + "** çekilişi yönetici tarafından iptal edildi."), view=None)
             except Exception: pass
-            await sendv_eph(it, WN("İPTAL"))
+            await sendv_eph(it, WN("İPTAL EDİLDİ", "Çekiliş kaldırıldı; katılımcılar geri bildirimsiz çıkarıldı."))
         self.btn("Katıl", join, style=discord.ButtonStyle.success, emoji=e("party"), cid="kg_join", row=0)
         self.btn("Ayrıl", leave, style=discord.ButtonStyle.secondary, cid="kg_leave", row=0)
         self.btn("Bitir", end, emoji="🏁", cid="kg_end", row=1)
@@ -519,12 +520,12 @@ class GwJumpPanel(Panel):
 def poll_content(p):
     opts = json.loads(p["options"]); votes = json.loads(p["votes"]); total = sum(len(v) for v in votes.values())
     L = ["## " + e("chart") + " ANKET: " + p["question"], DIV]
-    if p["status"] != "active": L.append(e("lock") + " **KAPANDI**")
+    if p["status"] != "active": L.append(e("lock") + " **ANKET KAPANDI**")
     L.append("")
     for i, op in enumerate(opts):
         n = len(votes.get(str(i), [])); pc = (n / total * 100) if total else 0
         L.append(e("arrow") + " **" + op + "** ─ `" + str(n) + "` oy " + bar(pc, 10))
-    L += ["", e("dot") + " Toplam **" + str(total) + "** oy • " + (e("party") + " Bitti!" if p["status"] != "active" else "tek oy, değişmez")]
+    L += ["", e("dot") + " Toplam **" + str(total) + "** oy • " + (e("party") + " Sonuç belli!" if p["status"] != "active" else "Kişi başı tek oy hakkı vardır")]
     return "\n".join(L)
 class PollPanel(Panel):
     def __init__(self, pid, opts, text):
@@ -532,26 +533,26 @@ class PollPanel(Panel):
         for i, op in enumerate(opts[:5]):
             async def cb(it, idx=i):
                 p = db.one("SELECT * FROM polls WHERE id=?", (self.pid,))
-                if not p or p["status"] != "active": return await sendv_eph(it, ER("KAPALI"))
+                if not p or p["status"] != "active": return await sendv_eph(it, ER("KAPALI", "Anket artık oya kapalıdır."))
                 v = json.loads(p["votes"])
                 for lst in v.values():
-                    if str(it.user.id) in lst: return await sendv_eph(it, WN("ZATEN OY VERDİN"))
+                    if str(it.user.id) in lst: return await sendv_eph(it, WN("ZATEN OY VERDİN", "Tek oy hakkını kullandın."))
                 v.setdefault(str(idx), []).append(str(it.user.id)); db.q("UPDATE polls SET votes=? WHERE id=?", (json.dumps(v), self.pid))
                 p2 = db.one("SELECT * FROM polls WHERE id=?", (self.pid,))
                 try: await it.message.edit(content=poll_content(p2), view=PollPanel(self.pid, json.loads(p2["options"]), poll_content(p2)))
                 except Exception: pass
-                await sendv_eph(it, OK("OYUN KAYDEDİLDİ", json.loads(p["options"])[idx]))
+                await sendv_eph(it, OK("OY KAYDEDİLDİ", "**" + json.loads(p["options"])[idx] + "** seçeneğine oy verdin."))
             self.btn(op[:60], cb, emoji=e("dot"), cid="poll_" + str(pid) + "_" + str(i), row=0)
         async def close(it):
             p = db.one("SELECT * FROM polls WHERE id=?", (self.pid,))
             if not p: return
-            if not (it.user.id == p["creator"] or (it.guild and it.guild.permissions_for(it.user).administrator)): return await sendv_eph(it, ER("YETKİ YOK"))
-            if p["status"] != "active": return await sendv_eph(it, WN("ZATEN KAPALI"))
+            if not (it.user.id == p["creator"] or (it.guild and it.guild.permissions_for(it.user).administrator)): return await sendv_eph(it, ER("YETKİ YOK", "Sadece oluşturan veya yönetici kapatabilir."))
+            if p["status"] != "active": return await sendv_eph(it, WN("ZATEN KAPALI", "Anket zaten sonlanmış."))
             db.q("UPDATE polls SET status='closed' WHERE id=?", (self.pid,))
             p2 = db.one("SELECT * FROM polls WHERE id=?", (self.pid,))
             try: await it.message.edit(content=poll_content(p2), view=PollPanel(self.pid, json.loads(p2["options"]), poll_content(p2)))
             except Exception: pass
-            await sendv_eph(it, OK("KAPATILDI"))
+            await sendv_eph(it, OK("KAPATILDI", "Anket sonuçları donduruldu."))
         self.btn("Anketi Kapat", close, style=discord.ButtonStyle.danger, emoji=e("lock"), cid="pollc_" + str(pid), row=1)
 
 class RoleMenuPanel(Panel):
@@ -560,46 +561,46 @@ class RoleMenuPanel(Panel):
         for i, (rid, nm) in enumerate(roles):
             async def cb(it, r_id=rid):
                 r = it.guild.get_role(r_id)
-                if not r: return await sendv_eph(it, ER("ROL YOK"))
-                if r in it.user.roles: await it.user.remove_roles(r); m = e("cross") + " " + r.name
-                else: await it.user.add_roles(r); m = e("check") + " " + r.name
-                await sendv_eph(it, head("shield", "ROL") + "\n" + m)
+                if not r: return await sendv_eph(it, ER("ROL YOK", "Bu rol artık sunucuda mevcut değil."))
+                if r in it.user.roles: await it.user.remove_roles(r); m = e("cross") + " Rol alındı: **" + r.name + "**"
+                else: await it.user.add_roles(r); m = e("check") + " Rol verildi: **" + r.name + "**"
+                await sendv_eph(it, head("shield", "ROL MENÜSÜ") + "\n" + m)
             self.btn(nm[:78], cb, style=discord.ButtonStyle.secondary, emoji="🎭", cid="kr_" + mid + "_" + str(rid), row=i // 5)
 
 class TicketModal(Modal, title="Destek Talebi"):
     konu = TextInput(label="Konu", max_length=100); acik = TextInput(label="Açıklama", style=discord.TextStyle.paragraph)
     async def on_submit(self, it):
-        if db.one("SELECT 1 FROM tickets WHERE user_id=? AND status='open'", (it.user.id,)): return await it.response.send_message(ER("AÇIK TALEBİN VAR"), ephemeral=True)
+        if db.one("SELECT 1 FROM tickets WHERE user_id=? AND status='open'", (it.user.id,)): return await it.response.send_message(ER("ZATEN VAR", "Senin açık bir destek talebin bulunuyor; önce onu kapat."), ephemeral=True)
         g = it.guild; cat = discord.utils.get(g.categories, name="DESTEK") or await g.create_category("DESTEK")
         ow = {g.default_role: discord.PermissionOverwrite(view_channel=False), it.user: discord.PermissionOverwrite(view_channel=True, send_messages=True, attach_files=True), g.me: discord.PermissionOverwrite(view_channel=True, send_messages=True, manage_channels=True, manage_messages=True)}
         try: ch = await g.create_text_channel("destek-" + it.user.name.lower(), category=cat, overwrites=ow)
-        except Exception as ex: return await it.response.send_message(ER("KANAL HATASI", str(ex)[:150]), ephemeral=True)
+        except Exception as ex: return await it.response.send_message(ER("KANAL AÇILAMADI", str(ex)[:150]), ephemeral=True)
         db.q("INSERT INTO tickets(channel_id,guild_id,user_id) VALUES(?,?,?)", (ch.id, g.id, it.user.id))
-        await rp_ch(ch, head("ticket", "DESTEK TALEBİ") + "\n" + KV([(e("dot")+"Kullanıcı", it.user.mention), (e("clip")+"Konu", self.konu.value), (e("pen")+"Açıklama", self.acik.value[:400])]) + "\n\n" + e("info") + " Yetkililer birazdan burada.", TicketPanel(" "))
-        await it.response.send_message(OK("TALEP", ch.mention), ephemeral=True)
+        await rp_ch(ch, head("ticket", "DESTEK TALEBİ") + "\n" + KV([(e("dot")+"Kullanıcı", it.user.mention), (e("clip")+"Konu", self.konu.value), (e("pen")+"Açıklama", self.acik.value[:400])]) + "\n\n" + e("info") + " Bir yetkili en kısa sürede seninle ilgilenecek.", TicketPanel(" "))
+        await it.response.send_message(OK("TALEP OLUŞTU", "Özel kanalın hazır: " + ch.mention), ephemeral=True)
 class TicketOpenPanel(Panel):
     def __init__(self, text):
         super().__init__(text, timeout=None)
         async def o(it): await it.response.send_modal(TicketModal())
         async def mine(it):
             t = db.one("SELECT * FROM tickets WHERE user_id=? AND status='open'", (it.user.id,))
-            await sendv_eph(it, OK("TALEBİN", "<#" + str(t["channel_id"]) + ">") if t else WN("TALEBİN YOK"))
+            await sendv_eph(it, OK("TALEBİN VAR", "Kanalın: <#" + str(t["channel_id"]) + ">") if t else WN("TALEBİN YOK", "Henüz açık destek talebin yok."))
         self.btn("Talep Oluştur", o, emoji=e("ticket"), cid="kt_open", row=0)
         self.btn("Talebim Var mı?", mine, style=discord.ButtonStyle.secondary, emoji=e("search"), cid="kt_mine", row=0)
 class TicketPanel(Panel):
     def __init__(self, text):
         super().__init__(text, timeout=None)
         async def claim(it):
-            if not it.user.guild_permissions.manage_messages: return await sendv_eph(it, ER("YETKİ YOK"))
+            if not it.user.guild_permissions.manage_messages: return await sendv_eph(it, ER("YETKİ YOK", "Sadece yetkililer talep üstlenebilir."))
             db.q("UPDATE tickets SET claimed_by=? WHERE channel_id=?", (it.user.id, it.channel.id))
-            await rp_ch(it.channel, head("shield", "ÜSTLENİLDİ") + "\n" + it.user.mention); await it.response.defer()
+            await rp_ch(it.channel, head("shield", "ÜSTLENİLDİ") + "\nBu talebi **" + it.user.display_name + "** ele aldı."); await it.response.defer()
         async def close(it):
             t = db.one("SELECT * FROM tickets WHERE channel_id=?", (it.channel.id,))
-            if not t: return await sendv_eph(it, ER("BULUNAMADI"))
-            if not (it.user.guild_permissions.administrator or it.user.id == t["user_id"]): return await sendv_eph(it, ER("YETKİ YOK"))
+            if not t: return await sendv_eph(it, ER("BULUNAMADI", "Bu kanal kayıt altında değil."))
+            if not (it.user.guild_permissions.administrator or it.user.id == t["user_id"]): return await sendv_eph(it, ER("YETKİ YOK", "Sadece sahibi veya yönetici kapatabilir."))
             db.q("UPDATE tickets SET status='closed' WHERE channel_id=?", (it.channel.id,))
-            await guild_log_send(it.guild, head("ticket", "KAPANDI") + "\n#" + it.channel.name)
-            await sendv_eph(it, WN("KAPATILIYOR", "10 sn")); await asyncio.sleep(10)
+            await guild_log_send(it.guild, head("ticket", "TALEP KAPANDI") + "\n#" + it.channel.name)
+            await sendv_eph(it, WN("KAPATILIYOR", "Kanal 10 saniye içinde silinecek.")); await asyncio.sleep(10)
             try: await it.channel.delete()
             except Exception: pass
         self.btn("Üstlendim", claim, emoji="👮", cid="kt_claim", row=0)
@@ -615,14 +616,14 @@ class AppModal(Modal, title="Yetkili Başvurusu"):
     ned = TextInput(label="Neden yetkili olmak istiyorsun?", style=discord.TextStyle.paragraph, max_length=500); akt = TextInput(label="Aktif saatlerin", max_length=100)
     async def on_submit(self, it):
         st = db.one("SELECT * FROM app_settings WHERE guild_id=?", (it.guild.id,))
-        if not st or not st["log_ch"]: return await it.response.send_message(ER("KURULU DEĞİL", "`k!başvuru-ayarla`"), ephemeral=True)
-        if db.one("SELECT 1 FROM applications WHERE guild_id=? AND user_id=? AND status='pending'", (it.guild.id, it.user.id)): return await it.response.send_message(WN("BEKLEYEN BAŞVURUN VAR"), ephemeral=True)
+        if not st or not st["log_ch"]: return await it.response.send_message(ER("SİSTEM KURULU DEĞİL", "Yönetici önce `k!başvuru-ayarla` yapmalı."), ephemeral=True)
+        if db.one("SELECT 1 FROM applications WHERE guild_id=? AND user_id=? AND status='pending'", (it.guild.id, it.user.id)): return await sendv_eph(it, WN("BEKLEYEN VAR", "Başvurun zaten değerlendirme sırasındadır."))
         cur = db.q("INSERT INTO applications(guild_id,user_id,answers,ts) VALUES(?,?,?,?)", (it.guild.id, it.user.id, json.dumps({"y":self.yas.value,"d":self.den.value,"n":self.ned.value,"a":self.akt.value}), datetime.datetime.now().isoformat()))
         aid = cur.lastrowid; ch = it.guild.get_channel(st["log_ch"])
         if ch:
-            m = await rp_ch(ch, head("clip", "BAŞVURU #" + str(aid)) + "\n" + KV([(e("dot")+"Kim", it.user.mention), (e("cake")+"Yaş", self.yas.value), (e("shield")+"Deneyim", self.den.value[:250]), (e("heart")+"Neden", self.ned.value[:250])]), AppReviewPanel(aid, " "))
+            m = await rp_ch(ch, head("clip", "YENİ BAŞVURU #" + str(aid)) + "\n" + KV([(e("dot")+"Kim", it.user.mention), (e("cake")+"Yaş", self.yas.value), (e("shield")+"Deneyim", self.den.value[:250]), (e("heart")+"Motivasyon", self.ned.value[:250])]), AppReviewPanel(aid, " "))
             db.q("UPDATE applications SET message_id=? WHERE id=?", (m.id, aid))
-        await it.response.send_message(OK("ALINDI", "#" + str(aid)), ephemeral=True)
+        await it.response.send_message(OK("BAŞVURU ALINDI", "#" + str(aid) + " numaralı başvurun ekibe iletildi."), ephemeral=True)
 class AppReviewPanel(Panel):
     def __init__(self, aid, text):
         super().__init__(text, timeout=None); self.aid = aid
@@ -632,34 +633,34 @@ class AppReviewPanel(Panel):
             if st and st["staff_role"]:
                 r = it.guild.get_role(st["staff_role"])
                 if r and r in it.user.roles: ok = True
-            if not ok: await sendv_eph(it, ER("YETKİ YOK")); return False
+            if not ok: await sendv_eph(it, ER("YETKİ YOK", "Sadece yönetim veya görevli rolü karar verebilir.")); return False
             return True
         async def acc(it):
             if not await yk(it): return
             a = db.one("SELECT * FROM applications WHERE id=?", (self.aid,))
-            if not a or a["status"] != "pending": return await sendv_eph(it, WN("İŞLENMİŞ"))
+            if not a or a["status"] != "pending": return await sendv_eph(it, WN("İŞLENMİŞ", "Bu başvuru zaten karara bağlanmış."))
             db.q("UPDATE applications SET status='accepted' WHERE id=?", (self.aid,))
             st = db.one("SELECT * FROM app_settings WHERE guild_id=?", (it.guild.id,))
             r = it.guild.get_role(st["staff_role"]) if st and st["staff_role"] else None
             mb = it.guild.get_member(a["user_id"])
             if r and mb:
-                try: await mb.add_roles(r, reason="Başvuru")
+                try: await mb.add_roles(r, reason="Başvuru kabulü")
                 except Exception: pass
-            try: await it.message.edit(content=OK("İŞLENDİ", "Kabul"), view=None)
+            try: await it.message.edit(content=OK("KABUL EDİLDİ", "<@" + str(a["user_id"]) + "> başvuruları onaylandı."), view=None)
             except Exception: pass
             u = it.client.get_user(a["user_id"])
             if u:
-                try: await u.send(OK("KABUL", it.guild.name))
+                try: await u.send(OK("TEBRİKLER", "**" + it.guild.name + "** sunucusundaki yetkili başvurun kabul edildi!"))
                 except Exception: pass
-            await sendv_eph(it, OK("KABUL", "<@" + str(a["user_id"]) + ">"))
+            await sendv_eph(it, OK("KABUL", "<@" + str(a["user_id"]) + "> kabul edildi ve rol verildi."))
         async def rej(it):
             if not await yk(it): return
             a = db.one("SELECT * FROM applications WHERE id=?", (self.aid,))
-            if not a or a["status"] != "pending": return await sendv_eph(it, WN("İŞLENMİŞ"))
+            if not a or a["status"] != "pending": return await sendv_eph(it, WN("İŞLENMİŞ", "Karar zaten verilmiş."))
             db.q("UPDATE applications SET status='rejected' WHERE id=?", (self.aid,))
-            try: await it.message.edit(content=ER("İŞLENDİ", "Red"), view=None)
+            try: await it.message.edit(content=WN("REDDEDİLDİ", "<@" + str(a["user_id"]) + "> başvurusu reddedildi."), view=None)
             except Exception: pass
-            await sendv_eph(it, ER("RED", "<@" + str(a["user_id"]) + ">"))
+            await sendv_eph(it, ER("RED", "<@" + str(a["user_id"]) + "> başvurusu reddedildi."))
         self.btn("Kabul", acc, style=discord.ButtonStyle.success, emoji=e("check"), cid="ka_acc_" + str(aid))
         self.btn("Red", rej, style=discord.ButtonStyle.danger, emoji=e("cross"), cid="ka_rej_" + str(aid))
 
@@ -668,43 +669,43 @@ class TVNameModal(Modal, title="Oda İsmi"):
         super().__init__(); self.cid = cid; self.ni = TextInput(label="Yeni isim", max_length=50); self.add_item(self.ni)
     async def on_submit(self, it):
         ch = it.client.get_channel(self.cid)
-        if not ch: return await it.response.send_message(ER("ODA YOK"), ephemeral=True)
-        await ch.edit(name=self.ni.value[:50]); await it.response.send_message(OK("İSİM", ch.name), ephemeral=True)
+        if not ch: return await it.response.send_message(ER("ODA YOK", "Kanal silinmiş olabilir."), ephemeral=True)
+        await ch.edit(name=self.ni.value[:50]); await it.response.send_message(OK("İSİM DEĞİŞTİ", "Yeni ad: **" + ch.name + "**"), ephemeral=True)
 class TVLimitModal(Modal, title="Oda Limiti"):
     def __init__(self, cid):
         super().__init__(); self.cid = cid; self.li = TextInput(label="Limit 0-99", max_length=2); self.add_item(self.li)
     async def on_submit(self, it):
         ch = it.client.get_channel(self.cid)
-        if not ch: return await it.response.send_message(ER("ODA YOK"), ephemeral=True)
+        if not ch: return await it.response.send_message(ER("ODA YOK", "Kanal bulunamadı."), ephemeral=True)
         try: n = max(0, min(99, int(self.li.value)))
         except ValueError: n = 0
-        await ch.edit(user_limit=n or None); await it.response.send_message(OK("LİMİT", str(n or "sınırsız")), ephemeral=True)
+        await ch.edit(user_limit=n or None); await it.response.send_message(OK("LİMİT AYARLANDI", str(n) + " kişi" if n else "sınırsız"), ephemeral=True)
 class TVPanel(Panel):
     def __init__(self, cid, text):
         super().__init__(text, timeout=None); self.cid = cid
         async def oc(it):
             row = db.one("SELECT * FROM temp_channels WHERE channel_id=?", (self.cid,))
-            if not row or row["owner_id"] != it.user.id: await sendv_eph(it, ER("YETKİ", "Sahibi değilsin.")); return None
+            if not row or row["owner_id"] != it.user.id: await sendv_eph(it, ER("YETKİ", "Bu odanın sahibi sen değilsin.")); return None
             ch = it.client.get_channel(self.cid)
-            if not ch: await sendv_eph(it, ER("ODA YOK")); return None
+            if not ch: await sendv_eph(it, ER("ODA YOK", "Kanal silinmiş.")); return None
             return ch
         async def lock(it):
             ch = await oc(it)
             if not ch: return
             lk = ch.overwrites_for(ch.guild.default_role).connect is False
             await ch.set_permissions(ch.guild.default_role, connect=None if lk else False, view_channel=None if lk else False)
-            await sendv_eph(it, OK("KİLİT", "Açıldı" if lk else "Kilitlendi"))
+            await sendv_eph(it, OK("KİLİT DURUMU", "Oda artık herkese açık." if lk else "Odaya giriş kilitlendi."))
         async def nm(it):
             if await oc(it): await it.response.send_modal(TVNameModal(self.cid))
         async def lm(it):
             if await oc(it): await it.response.send_modal(TVLimitModal(self.cid))
         async def iv(it):
             ch = await oc(it)
-            if ch: await sendv_eph(it, OK("DAVET", (await ch.create_invite(max_uses=1, max_age=3600)).url))
+            if ch: await sendv_eph(it, OK("DAVET OLUŞTU", (await ch.create_invite(max_uses=1, max_age=3600)).url))
         async def dl(it):
             ch = await oc(it)
             if not ch: return
-            db.q("DELETE FROM temp_channels WHERE channel_id=?", (self.cid,)); await ch.delete(reason="Sahibi sildi"); await sendv_eph(it, OK("SİLİNDİ"))
+            db.q("DELETE FROM temp_channels WHERE channel_id=?", (self.cid,)); await ch.delete(reason="Sahibi sildi"); await sendv_eph(it, OK("ODA SİLİNDİ", "Geçici odan kaldırıldı."))
         self.btn("Kilitle/Aç", lock, style=discord.ButtonStyle.secondary, emoji=e("lock"), cid="tv_lock_" + str(cid))
         self.btn("İsim", nm, emoji="✏️", cid="tv_name_" + str(cid))
         self.btn("Limit", lm, emoji="👥", cid="tv_limit_" + str(cid))
@@ -798,7 +799,7 @@ class KatreBot(commands.Bot):
             if not ch: return
             up = str(datetime.datetime.now() - self.start_time).split(".")[0]
             top = db.all("SELECT cmd FROM cmd_stats ORDER BY uses DESC LIMIT 3")
-            txt = head("chart", "CANLI İSTATİSTİK") + "\n" + KV([(e("dot")+"Sunucu", len(self.guilds)), (e("dot")+"Kullanıcı", sum(g.member_count or 0 for g in self.guilds)), (e("dot")+"Komut", len(self.commands)), (e("dot")+"Uptime", up), (e("dot")+"Ping", str(round(self.latency*1000))+"ms"), (e("fire")+"Top", ", ".join("k!"+t["cmd"] for t in top) or "—")])
+            txt = head("chart", "CANLI İSTATİSTİK") + "\n" + KV([(e("dot")+"Sunucu", len(self.guilds)), (e("dot")+"Kullanıcı", sum(g.member_count or 0 for g in self.guilds)), (e("dot")+"Komut", len(self.commands)), (e("dot")+"Uptime", up), (e("dot")+"Ping", str(round(self.latency*1000))+"ms"), (e("fire")+"En Çok Kullanılan", ", ".join("k!"+t["cmd"] for t in top) or "—")])
             old = db.one("SELECT value FROM bot_meta WHERE key='stats_msg'")
             if old:
                 try: await (await ch.fetch_message(int(old["value"]))).delete()
@@ -817,15 +818,14 @@ class KatreBot(commands.Bot):
                 try: await rp_ch(ch, t)
                 except Exception: pass
     async def word_game(self, m, wg):
-        """📖 Kelime Türetme: doğru kelimeye ✅ tiki, yanlışa ❌ + sebep"""
         try:
             w = (m.content or "").strip().lower()
             if not w or " " in w or not w.isalpha() or len(w) < 3: return
             lw = wg["last_word"]; lu = wg["last_user"]; st = wg["streak"] or 0
             fail = None
-            if lw and w == lw: fail = "Aynı kelime tekrar edilemez!"
-            elif lw and w[0] != lw[-1]: fail = "Kelime **«" + lw[-1] + "»** harfiyle başlamalı!"
-            elif lu == m.author.id: fail = "Ardışık iki kelimeyi aynı kişi yazamaz!"
+            if lw and w == lw: fail = "Aynı kelime tekrar kullanılamaz."
+            elif lw and w[0] != lw[-1]: fail = "Kelime «" + lw[-1] + "» harfiyle başlamalıydı."
+            elif lu == m.author.id: fail = "Ardışık iki kelimeyi aynı kişi yazamaz."
             if fail:
                 try: await m.add_reaction(e("cross"))
                 except Exception: pass
@@ -840,7 +840,7 @@ class KatreBot(commands.Bot):
             db.q("UPDATE users SET coins=coins+? WHERE user_id=?", (bonus, m.author.id))
             db.q("UPDATE wordgame SET last_word=?, last_user=?, streak=? WHERE guild_id=?", (w, m.author.id, st, m.guild.id))
             if st % 5 == 0:
-                await rp_ch(m.channel, head("fire", "SERİ " + str(st) + "!") + "\n" + m.author.mention + " → **+50 bonus coin**")
+                await rp_ch(m.channel, head("fire", "SERİ " + str(st) + "!") + "\n" + m.author.mention + " → **+50 bonus coin** kazandı!")
         except Exception:
             traceback.print_exc()
     async def protections(self, m):
@@ -853,21 +853,21 @@ class KatreBot(commands.Bot):
             if p["anti_link"] and re.search(r"(https?://|discord\.gg/|www\.)", c, re.I):
                 try: await m.delete()
                 except Exception: pass
-                await self.mod_log(m.guild, e("link") + " ANTİ-LİNK: " + m.author.mention)
+                await self.mod_log(m.guild, e("link") + " ANTİ-LİNK tetiklendi: " + m.author.mention)
             elif p["badword"]:
                 ws = [w["word"] for w in db.all("SELECT word FROM badwords WHERE guild_id=?", (m.guild.id,))]
                 if any(w and w in c.lower() for w in ws):
                     try: await m.delete()
                     except Exception: pass
-                    await self.punish(m.author, 1, "Küfür"); await self.mod_log(m.guild, e("warn") + " KÜFÜR: " + m.author.mention)
+                    await self.punish(m.author, 1, "Küfür filtresi"); await self.mod_log(m.guild, e("warn") + " KÜFÜR algılandı: " + m.author.mention)
             if p["anti_spam"]:
                 dq = self.spam.setdefault(m.guild.id, {}).setdefault(m.author.id, deque()); dq.append(nw)
                 while dq and nw - dq[0] > 5: dq.popleft()
                 if len(dq) >= 7:
-                    dq.clear(); await self.punish(m.author, 5, "Spam")
+                    dq.clear(); await self.punish(m.author, 5, "Spam koruması")
                     try: await m.channel.purge(limit=6, check=lambda x: x.author.id == m.author.id)
                     except Exception: pass
-                    await self.mod_log(m.guild, e("cross") + " SPAM: " + m.author.mention)
+                    await self.mod_log(m.guild, e("cross") + " SPAM engellendi: " + m.author.mention)
             if p["anti_flood"]:
                 k = (m.guild.id, m.author.id); pv = self.flood.get(k)
                 cn = (pv[1] + 1) if (pv and pv[0] == c and nw - pv[2] < 10) else 1
@@ -876,7 +876,7 @@ class KatreBot(commands.Bot):
                     self.flood[k] = (c, 0, nw)
                     try: await m.delete()
                     except Exception: pass
-                    await self.mod_log(m.guild, e("warn") + " FLOOD: " + m.author.mention)
+                    await self.mod_log(m.guild, e("warn") + " FLOOD tespit edildi: " + m.author.mention)
         except Exception: traceback.print_exc()
     async def on_message(self, m):
         if m.author.bot: return
@@ -887,7 +887,7 @@ class KatreBot(commands.Bot):
                     nw = datetime.datetime.now().timestamp()
                     if nw - MAINT_CD.get(m.author.id, 0) > 30:
                         MAINT_CD[m.author.id] = nw
-                        try: await rp_ch(m.channel, head("warn", "BAKIMDAYIZ") + "\nBirazdan döneriz!")
+                        try: await rp_ch(m.channel, head("warn", "BAKIMDAYIZ") + "\nBot şu anda bakımda; birkaç dakika içinde döneceğiz.")
                         except Exception: pass
                 return
             if db.one("SELECT 1 FROM blacklist WHERE user_id=?", (m.author.id,)): return
@@ -897,7 +897,7 @@ class KatreBot(commands.Bot):
             if a:
                 dk = int((datetime.datetime.now() - datetime.datetime.fromisoformat(a["since"])).total_seconds() // 60)
                 db.q("DELETE FROM afk WHERE user_id=?", (m.author.id,))
-                msg = await rp_ch(m.channel, head("wave", "DÖNDÜ") + "\n" + m.author.mention + " • **" + sure_txt(dk) + "** • **" + str(a["mentions"] or 0) + "** mention")
+                msg = await rp_ch(m.channel, head("wave", "AFK'DAN DÖNDÜ") + "\n" + m.author.mention + " ─ **" + sure_txt(dk) + "** uzakta kaldı, **" + str(a["mentions"] or 0) + "** kez mention aldı.")
                 try: await msg.delete(delay=20)
                 except Exception: pass
             if m.guild:
@@ -905,7 +905,7 @@ class KatreBot(commands.Bot):
                     a = db.one("SELECT * FROM afk WHERE user_id=?", (mm.id,))
                     if a:
                         db.q("UPDATE afk SET mentions=mentions+1 WHERE user_id=?", (mm.id,))
-                        await rp_ch(m.channel, head("sleep", mm.display_name + " AFK") + "\n**" + (a["reason"] or "—") + "**"); break
+                        await rp_ch(m.channel, head("sleep", mm.display_name + " ŞU AN AFK") + "\nSebep: **" + (a["reason"] or "belirtilmemiş") + "**"); break
         except Exception: pass
         try:
             await self.protections(m)
@@ -935,9 +935,9 @@ class KatreBot(commands.Bot):
                         for lr in db.all("SELECT * FROM level_roles WHERE guild_id=? AND level<=?", (m.guild.id, lv)):
                             rr = m.guild.get_role(lr["role_id"])
                             if rr and rr not in m.author.roles:
-                                try: await m.author.add_roles(rr, reason="Seviye")
+                                try: await m.author.add_roles(rr, reason="Seviye ödülü")
                                 except Exception: pass
-                        await rp_ch(m.channel, head("chartup", "SEVİYE") + "\n" + m.author.mention + " → **Lv " + str(lv) + "**")
+                        await rp_ch(m.channel, head("chartup", "SEVİYE ATLADIN") + "\n" + m.author.mention + " → artık **Lv " + str(lv) + "** (+ " + str(cn) + " coin)")
                     db.q("UPDATE users SET xp=?,level=? WHERE user_id=?", (xp, lv, m.author.id))
         except Exception: traceback.print_exc()
         finally:
@@ -951,50 +951,50 @@ class KatreBot(commands.Bot):
                 ch = await g.create_voice_channel("🔊 " + member.display_name, category=cat, overwrites=ow)
                 db.q("INSERT OR REPLACE INTO temp_channels(channel_id,owner_id,guild_id) VALUES(?,?,?)", (ch.id, member.id, g.id))
                 self.add_view(TVPanel(ch.id, " ")); await member.move_to(ch, reason="Temp voice")
-                try: await member.send(head("mic", "ODAN HAZIR") + "\n**" + ch.name + "**", view=TVPanel(ch.id, head("mic", "ODAN HAZIR") + "\n**" + ch.name + "**"))
+                try: await member.send(head("mic", "ODAN HAZIR") + "\n**" + ch.name + "** kanalı oluşturuldu; panelden yönetebilirsin.", view=TVPanel(ch.id, head("mic", "ODAN HAZIR") + "\n**" + ch.name + "**")))
                 except Exception: pass
             for chn in (before.channel, after.channel):
                 if not chn: continue
                 row = db.one("SELECT * FROM temp_channels WHERE channel_id=?", (chn.id,))
                 if row and len(chn.members) == 0:
                     db.q("DELETE FROM temp_channels WHERE channel_id=?", (chn.id,))
-                    try: await chn.delete(reason="Boş")
+                    try: await chn.delete(reason="Boş olduğu için otomatik silindi")
                     except Exception: pass
         except Exception: traceback.print_exc()
     async def on_message_edit(self, b, a):
         if b.author.bot or not b.guild or b.content == a.content: return
-        await guild_log_send(b.guild, head("pen", "DÜZENLENDİ") + "\n" + b.author.mention + "\n> " + (b.content or "")[:200] + "\n> " + (a.content or "")[:200])
+        await guild_log_send(b.guild, head("pen", "MESAJ DÜZENLENDİ") + "\n" + b.author.mention + "\nEski:\n> " + (b.content or "")[:200] + "\nYeni:\n> " + (a.content or "")[:200])
     async def on_message_delete(self, m):
         try:
             if m.author.bot or not m.guild: return
             db.q("INSERT OR REPLACE INTO snipe(channel_id,author_id,content,attachment,ts) VALUES(?,?,?,?,?)", (m.channel.id, m.author.id, (m.content or "")[:1000], m.attachments[0].url if m.attachments else None, datetime.datetime.now().isoformat()))
-            await guild_log_send(m.guild, head("trash", "SİLİNDİ") + "\n" + m.author.mention + "\n> " + ((m.content or "")[:200] or "_ek_"))
+            await guild_log_send(m.guild, head("trash", "MESAJ SİLİNDİ") + "\n" + m.author.mention + "\n> " + ((m.content or "")[:200] or "_dosya eki_"))
         except Exception: pass
-    async def on_member_remove(self, m): await guild_log_send(m.guild, e("wave") + " **AYRILDI** › " + str(m))
+    async def on_member_remove(self, m): await guild_log_send(m.guild, e("wave") + " **SUNUCUDAN AYRILDI** › " + str(m))
     async def on_member_update(self, b, a):
-        if b.nick != a.nick: await guild_log_send(a.guild, head("tag", "NICK") + "\n" + a.mention + "\n> " + str(b.nick) + " → " + str(a.nick))
+        if b.nick != a.nick: await guild_log_send(a.guild, head("tag", "NICK DEĞİŞTİ") + "\n" + a.mention + "\n> " + str(b.nick) + " → " + str(a.nick))
     async def on_command_completion(self, ctx): db.q("INSERT INTO cmd_stats(cmd,uses) VALUES(?,1) ON CONFLICT(cmd) DO UPDATE SET uses=uses+1", (ctx.command.name,))
     async def on_command_error(self, ctx, er):
         if isinstance(er, OwnerOnly): return
         if isinstance(er, ProOnly):
-            v = Panel(head("pro", "PRO GEREKLİ") + "\nBu komut sadece PRO üyelere özel.\n📋 `k!pro` • 💎 `k!probonus`")
-            v.btn_url("Pro Destek", SUPPORT_URL, emoji=e("diamond"))
+            v = Panel(head("pro", "PRO GEREKLİ") + "\nBu komut yalnızca PRO üyelere açıktır.\n📋 Durum: `k!pro` • 💎 Bonus: `k!probonus`")
+            v.btn_url("Pro Bilgi/Destek", SUPPORT_URL, emoji=e("diamond"))
             await rp(ctx, v.text, v); return
-        if isinstance(er, commands.CommandNotFound): await rp(ctx, e("search") + " Yok → `k!yardım`"); return
-        if isinstance(er, commands.MissingRequiredArgument): await rp(ctx, ER("EKSİK", "`k!" + ctx.command.name + " " + ctx.command.signature + "`")); return
-        if isinstance(er, commands.CommandOnCooldown): await rp(ctx, head("time", "BEKLE") + "\n**" + str(int(er.retry_after)) + " sn** sonra dene."); return
+        if isinstance(er, commands.CommandNotFound): await rp(ctx, e("search") + " Böyle bir komut yok → tam liste için `k!yardım`"); return
+        if isinstance(er, commands.MissingRequiredArgument): await rp(ctx, ER("ARGÜMAN EKSİK", "`k!" + ctx.command.name + " " + ctx.command.signature + "` biçiminde yazmalısın.")); return
+        if isinstance(er, commands.CommandOnCooldown): await rp(ctx, head("time", "BEKLEME SÜRESİ") + "\nBu komutu tekrar kullanmak için **" + str(int(er.retry_after)) + " sn** daha beklemen gerekiyor."); return
         if isinstance(er, commands.BotMissingPermissions):
-            await rp(ctx, ER("BOT YETKİSİ EKSİK", "`" + ", ".join(er.missing_permissions) + "`\nKatre rolüne **Yönetici** ver + en üste taşı.")); return
-        if isinstance(er, commands.MissingPermissions): await rp(ctx, ER("YETKİN YOK", "`" + ", ".join(er.missing_permissions) + "`")); return
-        if isinstance(er, commands.CheckFailure): await rp(ctx, ER("YETKİ YOK")); return
+            await rp(ctx, ER("BOT YETKİSİ EKSİK", "Gerekli izinler: `" + ", ".join(er.missing_permissions) + "`\nKatre rolüne **Yönetici** ver ve listenin en üstüne taşı.")); return
+        if isinstance(er, commands.MissingPermissions): await rp(ctx, ER("SENİN YETKİN YOK", "Gerekli izinler: `" + ", ".join(er.missing_permissions) + "`")); return
+        if isinstance(er, commands.CheckFailure): await rp(ctx, ER("KOŞUL KARŞILANMADI", "Bu komut için gerekli şartları sağlamıyorsun.")); return
         if isinstance(er, commands.CommandInvokeError):
             o = er.original
             if isinstance(o, discord.Forbidden):
-                try: await ctx.author.send(ER("YETKİ", "#" + str(ctx.channel) + " yetkim yok."))
+                try: await ctx.author.send(ER("YETKİ REDDEDİLDİ", "#" + str(ctx.channel) + " kanalında konuşma/görüntüleme iznim yok."))
                 except Exception: pass
                 return
             er = o
-        await rp(ctx, head("warn", "HATA") + "\n```\n" + str(er)[:700] + "\n```"); traceback.print_exc()
+        await rp(ctx, head("warn", "BEKLENMEDİK HATA") + "\n```\n" + str(er)[:700] + "\n```\nSorun devam ederse destek sunucusundan bildirin."); traceback.print_exc()
     async def on_member_join(self, mb):
         ensure_user(mb.id, str(mb))
         try:
@@ -1003,9 +1003,9 @@ class KatreBot(commands.Bot):
                 nw = datetime.datetime.now().timestamp(); dq = self.joins.setdefault(mb.guild.id, deque()); dq.append(nw)
                 while dq and nw - dq[0] > 10: dq.popleft()
                 if len(dq) >= 8 and nw > (p["raid_until"] or 0):
-                    db.q("UPDATE protections SET raid_until=? WHERE guild_id=?", (nw + 600, mb.guild.id)); await self.mod_log(mb.guild, head("shield", "RAID") + "\n10dk kilit!")
+                    db.q("UPDATE protections SET raid_until=? WHERE guild_id=?", (nw + 600, mb.guild.id)); await self.mod_log(mb.guild, head("shield", "RAID KORUMASI AKTİF") + "\n10 dakikalık yeni üye kilidi devreye girdi!")
                 if (p["raid_until"] or 0) > nw:
-                    try: await mb.kick(reason="Anti-raid")
+                    try: await mb.kick(reason="Anti-raid koruması")
                     except Exception: pass
                     return
         except Exception: traceback.print_exc()
@@ -1014,12 +1014,12 @@ class KatreBot(commands.Bot):
             if s["auto_role"]:
                 r = mb.guild.get_role(s["auto_role"])
                 if r:
-                    try: await mb.add_roles(r, reason="Otorol")
+                    try: await mb.add_roles(r, reason="Otomatik rol")
                     except Exception: pass
             if s["welcome_ch"]:
                 ch = mb.guild.get_channel(s["welcome_ch"])
                 if ch:
-                    try: await rp_ch(ch, head("wave", "HOŞ GELDİN") + "\n### " + mb.mention + "\n" + e("party") + " **" + str(mb.guild.member_count) + "** üye!")
+                    try: await rp_ch(ch, head("wave", "HOŞ GELDİN") + "\n### " + mb.mention + "\n" + e("party") + " **" + str(mb.guild.member_count) + "**. üye olarak aramıza katıldı!")
                     except Exception: pass
         try:
             c = db.one("SELECT * FROM counters WHERE guild_id=?", (mb.guild.id,))
@@ -1028,15 +1028,15 @@ class KatreBot(commands.Bot):
                 if ch:
                     cu = mb.guild.member_count
                     if cu >= c["target"]:
-                        db.q("UPDATE counters SET reached=1 WHERE guild_id=?", (mb.guild.id,)); await rp_ch(ch, head("party", "HEDEF") + "\n**" + str(c["target"]) + "** üye!")
-                    else: await rp_ch(ch, head("target", "SAYAÇ") + "\n**" + str(cu) + "/" + str(c["target"]) + "**\n" + bar(cu / c["target"] * 100))
+                        db.q("UPDATE counters SET reached=1 WHERE guild_id=?", (mb.guild.id,)); await rp_ch(ch, head("party", "HEDEF TAMAMLANDI") + "\n**" + str(c["target"]) + "** üye sayısına ulaşıldı! 🎉")
+                    else: await rp_ch(ch, head("target", "ÜYE SAYACI") + "\n**" + str(cu) + "/" + str(c["target"]) + "**\n" + bar(cu / c["target"] * 100))
         except Exception: pass
     async def on_guild_join(self, g):
         ensure_server(g.id); db.q("INSERT OR IGNORE INTO protections(guild_id) VALUES(?)", (g.id,))
         if not EMO_CACHE: auto_map_emojis(g)
         ch = g.system_channel or next((c for c in g.text_channels if c.permissions_for(g.me).send_messages), None)
         if ch:
-            v = Panel(head("logo", "KATRE ARANIZDA") + "\n`k!yardım` • `k!kurulum` • `k!kelimekur`"); v.btn_url("Destek", SUPPORT_URL, emoji=e("link"))
+            v = Panel(head("logo", "KATRE SUNUCUNUZA EKLENDİ") + "\nBaşlamak için: `k!yardım` • Kurulum: `k!kurulum` • Kelime oyunu: `k!kelimekur`"); v.btn_url("Destek Sunucusu", SUPPORT_URL, emoji=e("link"))
             await rp_ch(ch, v.text, v)
 
 async def finalize_giveaway(bot, mid):
@@ -1046,7 +1046,7 @@ async def finalize_giveaway(bot, mid):
     ch = bot.get_channel(gw["channel_id"])
     if not ch: return
     if not p:
-        try: await rp_ch(ch, head("warn", "BİTTİ") + "\n**" + gw["prize"] + "** katılımcı yok.")
+        try: await rp_ch(ch, head("warn", "ÇEKİLİŞ SONA ERDİ") + "\n**" + gw["prize"] + "** ödüllü çekilişe hiç katılımcı olmadı.")
         except Exception: pass
         return
     n = min(gw["winners"], len(p)); ws = [bot.get_user(int(w)) for w in random.sample(p, n)]
@@ -1055,430 +1055,436 @@ async def finalize_giveaway(bot, mid):
         msg = await ch.fetch_message(mid); jump = msg.jump_url
         await msg.edit(content=gw_end(gw, men, p), view=GwJumpPanel(gw_end(gw, men, p), jump))
     except Exception: pass
-    await rp_ch(ch, head("party", "SONUÇ") + "\n" + men + " kazandı!")
+    await rp_ch(ch, head("party", "SONUÇ AÇIKLANDI") + "\n" + men + " kazandı!"); 
     for w in ws:
         if w:
-            try: await w.send(head("star", "KAZANDIN") + "\n**" + gw["prize"] + "** • " + ch.guild.name, view=GwJumpPanel(" ", jump) if jump else None)
+            try: await w.send(head("star", "TEBRİKLER!") + "\n**" + gw["prize"] + "** ödülünü **" + ch.guild.name + "** sunucusunda kazandınız!", view=GwJumpPanel(" ", jump) if jump else None)
             except Exception: pass
 
 bot = KatreBot()
 # >>> BÖLÜM 1 SONU — "devam" yaz, BÖLÜM 2 gelsin <<<
 # ═══════════════════════════════════════════════════════════════════
-#  💧 BÖLÜM 2/2 — KOMUTLAR
+#  💧 BÖLÜM 2/2 — KOMUTLAR (AÇIKLAYICI BAŞARILI/Başarısız METİNLERİ)
 # ═══════════════════════════════════════════════════════════════════
 @kategori("genel")
-@bot.command(name="yardım", aliases=["yardim","help","komutlar"], help="Yardım menüsü")
+@bot.command(name="yardım", aliases=["yardim","help","komutlar"], help="Yardım menüsünü açar")
 @commands.cooldown(1, 5, commands.BucketType.user)
 async def yardim(ctx):
     if HAS_V2:
         try:
-            await ctx.send(view=help_v2(bot, help_content(bot))); return
+            v = help_v2(bot, help_content(bot))
+            await ctx.send(view=v)
+            try: bot.add_view(v)
+            except Exception: pass
+            return
         except Exception: traceback.print_exc()
     await rp(ctx, help_content(bot), HelpPanel(bot, help_content(bot)))
 @kategori("genel")
-@bot.command(name="komutbilgi", aliases=["cmd"], help="<komut> — detay")
+@bot.command(name="komutbilgi", aliases=["cmd"], help="<komut> — komutun detaylı açıklaması")
 async def komutbilgi(ctx, *, name: str):
     c = bot.get_command(name.lower().replace("k!", "").strip())
-    if not c: return await rp(ctx, ER("YOK", "`k!komutbilgi mute`"))
-    await rp(ctx, head("info", "k!" + c.name) + "\n\n" + (c.help or "—") + "\n" + e("dot") + " Kullanım: `k!" + c.name + (" " + c.signature if c.signature else "") + "`")
+    if not c: return await rp(ctx, ER("BULUNAMADI", "`" + name + "` adında bir komut yok.\nTam liste için `k!yardım` kullan."))
+    await rp(ctx, head("info", "k!" + c.name) + "\n\n" + (c.help or "Bu komutun açıklaması eklenmemiş.") + "\n\nKullanım: `k!" + c.name + (" " + c.signature if c.signature else "") + "`")
 @kategori("genel")
-@bot.command(name="ping", help="Gecikme")
-async def ping(ctx): await rp(ctx, e("bolt") + " **PONG** › `" + str(round(bot.latency * 1000)) + "ms`")
+@bot.command(name="ping", help="Bot gecikmesini gösterir")
+async def ping(ctx): await rp(ctx, INFO("GEÇİKME", "API gecikmesi: **" + str(round(bot.latency * 1000)) + " ms**\n(Daha düşük değer daha hızlı demektir.)"))
 @kategori("genel")
-@bot.command(name="istatistik", aliases=["stats"], help="Bot istatistiği")
+@bot.command(name="istatistik", aliases=["stats"], help="Bot genel istatistikleri")
 async def istatistik(ctx):
     up = str(datetime.datetime.now() - bot.start_time).split(".")[0]
-    await rp(ctx, head("chart", "İSTATİSTİK") + "\n\n" + KV([(e("dot")+"Sunucu", len(bot.guilds)), (e("dot")+"Kullanıcı", sum(g.member_count or 0 for g in bot.guilds)), (e("dot")+"Komut", len(bot.commands)), (e("dot")+"Uptime", up), (e("dot")+"Ping", str(round(bot.latency*1000))+"ms"), (e("dot")+"Sürüm", "v"+BOT_VERSION), (e("dot")+"V2", "✅ Layout" if HAS_V2 else "— legacy")]))
+    await rp(ctx, head("chart", "BOT İSTATİSTİĞİ") + "\n\n" + KV([(e("dot")+"Sunucu", len(bot.guilds)), (e("dot")+"Toplam Kullanıcı", sum(g.member_count or 0 for g in bot.guilds)), (e("dot")+"Komut Sayısı", len(bot.commands)), (e("dot")+"Çalışma Süresi", up), (e("dot")+"Gecikme", str(round(bot.latency*1000))+"ms"), (e("dot")+"Sürüm", "v"+BOT_VERSION), (e("dot")+"V2 Modu", "✅ Aktif" if HAS_V2 else "— Legacy")]))
 @kategori("genel")
-@bot.command(name="mesajtop", help="Mesaj sıralaması")
+@bot.command(name="mesajtop", help="En çok mesaj atan ilk 10 kullanıcı")
 async def mesajtop(ctx):
     rs = db.all("SELECT * FROM users ORDER BY messages DESC LIMIT 10")
-    if not rs: return await rp(ctx, e("chart") + " Veri yok.")
-    md = ["🥇","🥈","🥉"]
-    await rp(ctx, head("pen", "MESAJ TOP") + "\n\n" + "\n".join((md[i] if i < 3 else "**" + str(i+1) + ".**") + " <@" + str(r["user_id"]) + "> ─ **" + str(r["messages"]) + "**" for i, r in enumerate(rs)))
+    if not rs: return await rp(ctx, WN("VERİ YOK", "Henüz kayıtlı mesaj verisi bulunmuyor."))
+    md = ["🥇","","🥉"]
+    await rp(ctx, head("pen", "MESAJ SIRALAMASI") + "\n\n" + "\n".join((md[i] if i < 3 else "**" + str(i+1) + ".**") + " <@" + str(r["user_id"]) + "> ─ **" + str(r["messages"]) + "** mesaj" for i, r in enumerate(rs)))
 @kategori("genel")
-@bot.command(name="davet", aliases=["invite"], help="Davet")
+@bot.command(name="davet", aliases=["invite"], help="Botu sunucuna davet et")
 async def davet(ctx):
     u = "https://discord.com/oauth2/authorize?client_id=" + str(bot.user.id) + "&permissions=8&scope=bot%20applications.commands"
-    v = Panel(head("logo", "KATRE BOT'U EKLE")); v.btn_url("Botu Ekle", u, emoji="➕"); v.btn_url("Destek", SUPPORT_URL, emoji=e("link"))
-    await rp(ctx, v.text, v)
+    v = Panel(head("logo", "DAVET ET")); v.btn_url("Botu Ekle", u, emoji="➕"); v.btn_url("Destek Sunucusu", SUPPORT_URL, emoji=e("link"))
+    await rp(ctx, v.text + "\n\n" + _q("Butona tıklayıp botu kendi sunucuna ekleyebilirsin."), v)
 @kategori("genel")
-@bot.command(name="avatar", aliases=["av","pfp"], help="Avatar")
+@bot.command(name="avatar", aliases=["av","pfp"], help="[<@üye>] — Avatar görüntüler")
 async def avatar(ctx, u: discord.Member = None):
     u = u or ctx.author
-    v = Panel(head("cam", u.display_name + " AVATAR") + "\n" + u.display_avatar.url); v.btn_url("Aç", u.display_avatar.url, emoji=e("link"))
+    v = Panel(head("cam", u.display_name + " AVATAR") + "\n" + u.display_avatar.url); v.btn_url("Tam Boyut Aç", u.display_avatar.url, emoji=e("link"))
     await rp(ctx, v.text, v)
 @kategori("genel")
-@bot.command(name="oda", help="<isim/limit/kilit/davet/sil> — odanı yönet")
+@bot.command(name="oda", help="<isim/limit/kilit/davet/sil> — Geçici ses odanı yönet")
 async def oda(ctx, i: str = "bilgi", *, arg=None):
     row = db.one("SELECT * FROM temp_channels WHERE owner_id=? AND guild_id=?", (ctx.author.id, ctx.guild.id))
-    if not row: return await rp(ctx, ER("ODAN YOK", "Temp voice kanalına gir."))
+    if not row: return await rp(ctx, ER("ODAN YOK", "Önce geçici bir ses kanalına girerek oda oluşturmalısın."))
     ch = ctx.guild.get_channel(row["channel_id"])
     if not ch:
-        db.q("DELETE FROM temp_channels WHERE channel_id=?", (row["channel_id"],)); return await rp(ctx, ER("ODA YOK"))
+        db.q("DELETE FROM temp_channels WHERE channel_id=?", (row["channel_id"],)); return await rp(ctx, ER("ODA SİLİNMİŞ", "Kayıtlı odan artık mevcut değil."))
     i = i.lower()
-    if i == "isim" and arg: await ch.edit(name=arg[:50]); await rp(ctx, OK("İSİM", ch.name))
+    if i == "isim" and arg: await ch.edit(name=arg[:50]); await rp(ctx, OK("İSİM DEĞİŞTİ", "Odanın yeni adı: **" + ch.name + "**"))
     elif i == "limit" and arg:
         try: n = max(0, min(99, int(arg)))
-        except ValueError: return await rp(ctx, ER("GEÇERSİZ", "0-99"))
-        await ch.edit(user_limit=n or None); await rp(ctx, OK("LİMİT", str(n or "sınırsız")))
+        except ValueError: return await rp(ctx, ER("GEÇERSİZ SAYI", "Lütfen 0 ile 99 arasında bir sayı gir."))
+        await ch.edit(user_limit=n or None); await rp(ctx, OK("LİMİT AYARLANDI", "Kapasite: **" + str(n or "sınırsız") + "** kişi"))
     elif i == "kilit":
         lk = ch.overwrites_for(ctx.guild.default_role).connect is False
         await ch.set_permissions(ctx.guild.default_role, connect=None if lk else False, view_channel=None if lk else False)
-        await rp(ctx, OK("KİLİT", "Açıldı" if lk else "Kilitlendi"))
-    elif i == "davet": await rp(ctx, OK("DAVET", (await ch.create_invite(max_uses=1, max_age=3600)).url))
+        await rp(ctx, OK("KİLİT DURUMU", "Oda artık herkese açık." if lk else "Odaya giriş kilitlendi; sadece sen ve davetlilerin girebilir."))
+    elif i == "davet": await rp(ctx, OK("DAVET LİNKİ", (await ch.create_invite(max_uses=1, max_age=3600)).url + "\n(Link 1 saat geçerlidir.)"))
     elif i == "sil":
-        db.q("DELETE FROM temp_channels WHERE channel_id=?", (ch.id,)); await ch.delete(); await rp(ctx, OK("SİLİNDİ"))
-    else: await rp(ctx, head("mic", ch.name) + "\n\n`isim` `limit` `kilit` `davet` `sil`")
+        db.q("DELETE FROM temp_channels WHERE channel_id=?", (ch.id,)); await ch.delete(); await rp(ctx, OK("ODA SİLİNDİ", "Geçici odan kaldırıldı."))
+    else: await rp(ctx, INFO(ch.name, "Komutlar:\n`k!oda isim <yeni ad>`\n`k!oda limit <sayı>`\n`k!oda kilit`\n`k!oda davet`\n`k!oda sil`"))
 @kategori("genel")
-@bot.command(name="rank", aliases=["seviye","level"], help="Seviye kartı")
+@bot.command(name="rank", aliases=["seviye","level"], help="[<@üye>] — Seviye kartı")
 @commands.cooldown(1, 3, commands.BucketType.user)
 async def rank(ctx, u: discord.Member = None):
     u = u or ctx.author; ensure_user(u.id, str(u)); d = db.one("SELECT * FROM users WHERE user_id=?", (u.id,)); nd = d["level"] * 100
     bd = []
     if d["pro"]: bd.append(e("pro") + " PRO")
     if d["pro_tag"]: bd.append(e("tag") + " " + d["pro_tag"])
-    if d["xp2"]: bd.append(e("bolt") + " 2x")
-    await rp(ctx, head("chartup", u.display_name + " RANK") + "\n\n" + ("### " + " • ".join(bd) + "\n" if bd else "") + KV([(e("star")+"Seviye", d["level"]), (e("spark")+"XP", str(d["xp"])+"/"+str(nd)), (e("coin")+"Coin", d["coins"]), (e("star")+"Rep", d["rep"])]) + "\n" + bar(d["xp"]/nd*100))
+    if d["xp2"]: bd.append(e("bolt") + " 2x XP")
+    await rp(ctx, head("chartup", u.display_name + " RANK") + "\n\n" + ("### " + " • ".join(bd) + "\n" if bd else "") + KV([(e("star")+"Seviye", d["level"]), (e("spark")+"Tecrübe", str(d["xp"])+"/"+str(nd)+" XP"), (e("coin")+"Coin", d["coins"]), (e("star")+"İtibar", d["rep"])]) + "\n\n" + bar(d["xp"]/nd*100) + "\n(Bir sonraki seviye için kalan XP yukarıda gösterilmektedir.)")
 @kategori("genel")
-@bot.command(name="sıralama", aliases=["sirala","top","lb"], help="Seviye top10")
+@bot.command(name="sıralama", aliases=["sirala","top","lb"], help="Seviye sıralaması (ilk 10)")
 async def sıralama(ctx):
     rs = db.all("SELECT * FROM users ORDER BY level DESC, xp DESC LIMIT 10")
-    if not rs: return await rp(ctx, e("chart") + " Veri yok.")
+    if not rs: return await rp(ctx, WN("VERİ YOK", "Henüz seviye atlayan kullanıcı yok."))
     md = ["🥇","","🥉"]
-    await rp(ctx, head("star", "SIRALAMA") + "\n\n" + "\n".join((md[i] if i < 3 else "**" + str(i+1) + ".**") + " <@" + str(r["user_id"]) + "> Lv.**" + str(r["level"]) + "** `" + str(r["xp"]) + "`" for i, r in enumerate(rs)))
+    await rp(ctx, head("star", "SEVİYE SIRALAMASI") + "\n\n" + "\n".join((md[i] if i < 3 else "**" + str(i+1) + ".**") + " <@" + str(r["user_id"]) + "> Lv.**" + str(r["level"]) + "** `" + str(r["xp"]) + "`" for i, r in enumerate(rs)))
 @kategori("genel")
-@bot.command(name="profil", aliases=["profile"], help="Profil")
+@bot.command(name="profil", aliases=["profile"], help="[<@üye>] — Profil bilgileri")
 async def profil(ctx, u: discord.Member = None):
     u = u or ctx.author; ensure_user(u.id, str(u)); d = db.one("SELECT * FROM users WHERE user_id=?", (u.id,)); a = db.one("SELECT * FROM afk WHERE user_id=?", (u.id,))
-    await rp(ctx, head("logo", u.display_name + " PROFİL") + "\n\n" + KV([(e("dot")+"ID", u.id), (e("time")+"Hesap", "<t:"+str(int(u.created_at.timestamp()))+":R>"), (e("chartup")+"Seviye", d["level"]), (e("coin")+"Coin", d["coins"]), (e("star")+"Rep", d["rep"]), (e("pro")+"Pro", "✅" if d["pro"] else "❌"), (e("sleep")+"AFK", "✅" if a else "❌")]))
+    await rp(ctx, head("logo", u.display_name + " PROFİLİ") + "\n\n" + KV([(e("dot")+"ID", u.id), (e("time")+"Hesap Yaşı", "<t:"+str(int(u.created_at.timestamp()))+":R>"), (e("chartup")+"Seviye", d["level"]), (e("coin")+"Coin", d["coins"]), (e("star")+"İtibar", d["rep"]), (e("pro")+"Pro Üyelik", "✅ Var" if d["pro"] else "❌ Yok"), (e("sleep")+"AFK Durumu", "✅ Uzakta" if a else "❌ Değil")]))
 @kategori("genel")
-@bot.command(name="sunucubilgi", aliases=["serverinfo"], help="Sunucu")
+@bot.command(name="sunucubilgi", aliases=["serverinfo"], help="Bulunduğun sunucunun bilgileri")
 async def sunucubilgi(ctx):
     g = ctx.guild
-    await rp(ctx, head("logo", g.name) + "\n\n" + KV([(e("crown")+"Kurucu", "<@"+str(g.owner_id)+">"), (e("dot")+"Üye", g.member_count), (e("dot")+"Kanal", len(g.channels)), (e("shield")+"Rol", len(g.roles)), (e("bolt")+"Boost", g.premium_subscription_count or 0)]))
+    await rp(ctx, head("logo", g.name) + "\n\n" + KV([(e("crown")+"Kurucu", "<@"+str(g.owner_id)+">"), (e("dot")+"Üye Sayısı", g.member_count), (e("dot")+"Kanal Sayısı", len(g.channels)), (e("shield")+"Rol Sayısı", len(g.roles)), (e("bolt")+"Boost Seviyesi", g.premium_subscription_count or 0)]))
 @kategori("genel")
-@bot.command(name="snipe", help="Silinen son mesaj")
+@bot.command(name="snipe", help="Az önce silinen mesajı gösterir")
 @commands.cooldown(1, 3, commands.BucketType.user)
 async def snipe(ctx):
     s = db.one("SELECT * FROM snipe WHERE channel_id=?", (ctx.channel.id,))
-    if not s: return await rp(ctx, e("cam") + " Kayıt yok.")
-    await rp(ctx, head("cam", "SNIPE") + "\n\n" + KV([(e("dot")+"Kim", "<@"+str(s["author_id"])+">"), (e("time")+"Tarih", s["ts"][:16])]) + "\n> " + ((s["content"] or "_ek_")[:700]))
+    if not s: return await rp(ctx, WN("KAYIT YOK", "Bu kanalda yakın zamanda silinmiş mesaj bulunmuyor."))
+    await rp(ctx, head("cam", "SNIPE") + "\n\n" + KV([(e("dot")+"Silinene", "<@"+str(s["author_id"])+">"), (e("time")+"Zaman", s["ts"][:16])]) + "\n\nMesaj içeriği:\n> " + ((s["content"] or "_dosya eki_")[:700]))
 @kategori("genel")
-@bot.command(name="afk", help="[sebep] — AFK")
+@bot.command(name="afk", help="[sebep] — Seni AFK moduna alır/düşürür")
 async def afk(ctx, *, s=None):
     cur = db.one("SELECT * FROM afk WHERE user_id=?", (ctx.author.id,))
     if cur and not s:
-        db.q("DELETE FROM afk WHERE user_id=?", (ctx.author.id,)); return await rp(ctx, OK("AFK KAPALI", "Döndün!"))
+        db.q("DELETE FROM afk WHERE user_id=?", (ctx.author.id,)); return await rp(ctx, OK("AFK KAPALI", "Tekrar aktifsın; seni mentionlayanlar bilgilendirilmeyecek."))
     db.q("INSERT OR REPLACE INTO afk(user_id,reason,since,mentions) VALUES(?,?,?,0)", (ctx.author.id, (s or "—")[:100], datetime.datetime.now().isoformat()))
-    await rp(ctx, head("sleep", "AFK AÇIK") + "\n\n" + e("arrow") + " Sebep: **" + (s or "—")[:100] + "**")
+    await rp(ctx, OK("AFK AÇILDI", "Sebep: **" + (s or "belirtilmemiş") + "**\nSeni etiketleyenlere otomatik bildirim gidicektir.")
 @kategori("genel")
-@bot.command(name="rep", help="<@üye> — itibar")
+@bot.command(name="rep", help="<@üye> — Birine itibar puanı verir")
 @commands.cooldown(1, 43200, commands.BucketType.user)
 async def rep(ctx, u: discord.Member):
-    if u.id == ctx.author.id: return await rp(ctx, ER("OLMAZ"))
+    if u.id == ctx.author.id: return await rp(ctx, ER("OLMAZ", "Kendine itibar veremezsin."))
     ensure_user(u.id, str(u)); db.q("UPDATE users SET rep=rep+1 WHERE user_id=?", (u.id,))
-    await rp(ctx, e("star") + " " + ctx.author.mention + " → " + u.mention + " **+1 itibar**")
+    await rp(ctx, OK("İTİBAR VERİLDİ", ctx.author.mention + " → " + u.mention + " için **+1 itibar** eklendi.\n(Günde 1 kez verebilirsin.)"))
 @kategori("genel")
-@bot.command(name="destek", aliases=["ticketpanel"], help="Destek paneli")
+@bot.command(name="destek", aliases=["ticketpanel"], help="Destek talebi panelini gönderir")
 @commands.has_permissions(administrator=True)
 async def destek(ctx):
-    t = head("ticket", "DESTEK MERKEZİ") + "\n\nButona bas, formu doldur!"; await rp(ctx, t, TicketOpenPanel(t))
+    t = head("ticket", "DESTEK MERKEZİ") + "\n\nBir sorununuz mu var? Butona basarak formu doldurun, size özel bir kanal açılsın."; await rp(ctx, t, TicketOpenPanel(t))
     try: await ctx.message.delete()
     except Exception: pass
 @kategori("genel")
-@bot.command(name="not", help="<metin>")
+@bot.command(name="not", help="<metin> — Kişisel not ekle")
 async def not_(ctx, *, m):
     ensure_user(ctx.author.id, str(ctx.author)); u = db.one("SELECT notes FROM users WHERE user_id=?", (ctx.author.id,))
     n = json.loads(u["notes"]); n.append({"t": m, "d": datetime.datetime.now().isoformat()})
-    db.q("UPDATE users SET notes=? WHERE user_id=?", (json.dumps(n), ctx.author.id)); await rp(ctx, OK("NOT", "Toplam `" + str(len(n)) + "` kayıt"))
+    db.q("UPDATE users SET notes=? WHERE user_id=?", (json.dumps(n), ctx.author.id)); await rp(ctx, OK("NOT EKLENDİ", "Notların listesi güncellendi. Toplam **" + str(len(n)) + "** kayıt var.\nGörüntülemek için `k!notlar` yaz."))
 @kategori("genel")
-@bot.command(name="notlar", help="Notların")
+@bot.command(name="notlar", help="Kişisel notlarını listeler")
 async def notlar(ctx):
     u = db.one("SELECT notes FROM users WHERE user_id=?", (ctx.author.id,)); n = json.loads(u["notes"]) if u else []
-    if not n: return await rp(ctx, e("pen") + " Yok.")
-    await rp(ctx, head("pen", "NOTLAR") + "\n\n" + "\n".join(e("arrow") + " `" + x["d"][:10] + "` " + x["t"][:60] for x in n[-8:]))
+    if not n: return await rp(ctx, WN("BOŞ", "Hiç not eklememişsin. Eklemek için `k!not <metin>` kullan."))
+    await rp(ctx, head("pen", "NOTLARIM") + "\n\n" + "\n".join(e("arrow") + " `" + x["d"][:10] + "` " + x["t"][:60] for x in n[-8:]) + "\n\n(Son 8 kayıt gösterilmektedir.)")
 @kategori("genel")
-@bot.command(name="doğumgünü", aliases=["dogumgunu"], help="<gün> <ay>")
+@bot.command(name="doğumgünü", aliases=["dogumgunu"], help="<gün> <ay> — Doğum gününü ayarla")
 async def doğumgünü(ctx, g: int, a: int):
-    if not (1 <= g <= 31 and 1 <= a <= 12): return await rp(ctx, ER("GEÇERSİZ"))
-    db.q("UPDATE users SET birthday=? WHERE user_id=?", (str(g)+"."+str(a), ctx.author.id)); await rp(ctx, OK("DOĞUM GÜNÜ", str(g) + "." + str(a)))
+    if not (1 <= g <= 31 and 1 <= a <= 12): return await rp(ctx, ER("GEÇERSİZ TARİH", "Gün 1-31, Ay 1-12 aralığında olmalıdır."))
+    db.q("UPDATE users SET birthday=? WHERE user_id=?", (str(g)+"."+str(a), ctx.author.id)); await rp(ctx, OK("DOĞUM GÜNÜ KAYDEDİLDİ", "Doğum günün olarak **" + str(g) + "." + str(a) + "** ayarlandı."))
 @kategori("genel")
-@bot.command(name="hatırlat", aliases=["hatirlat"], help="<dk> <metin>")
+@bot.command(name="hatırlat", aliases=["hatirlat"], help="<dakika> <metin> — Hatırlatıcı kur")
 async def hatırlat(ctx, dk: int, *, m):
-    if dk < 1 or dk > 1440: return await rp(ctx, ER("GEÇERSİZ", "1-1440"))
-    await rp(ctx, OK("HATIRLATICI", str(dk) + " dk sonra: " + m[:100])); await asyncio.sleep(dk * 60); await ctx.send(ctx.author.mention + " " + e("alarm") + " " + m)
+    if dk < 1 or dk > 1440: return await rp(ctx, ER("GEÇERSİZ SÜRE", "Süre 1 ile 1440 dakika (24 saat) arasında olmalıdır."))
+    await rp(ctx, OK("HATIRLATICI KURULDU", str(dk) + " dakika sonra sana şunu söyleyeceğim:\n> " + m[:100])); await asyncio.sleep(dk * 60); await ctx.send(ctx.author.mention + " " + e("alarm") + " **Hatırlatma:** " + m)
 @kategori("genel")
-@bot.command(name="botkontrol", aliases=["check"], help="Yetki teşhisi")
+@bot.command(name="botkontrol", aliases=["check"], help="Botun yetki eksiklerini kontrol eder")
 @commands.has_permissions(administrator=True)
 async def botkontrol(ctx):
     p = ctx.channel.permissions_for(ctx.guild.me)
-    cs = [("Mesaj",p.view_channel),("Gönder",p.send_messages),("Embed",p.embed_links),("Yönet",p.manage_messages),("Timeout",p.moderate_members),("Rol",p.manage_roles),("Kanal",p.manage_channels),("Ban",p.ban_members)]
-    await rp(ctx, head("gear", "BOT KONTROL") + "\n\n" + "\n".join((e("check") if ok else e("cross")) + " " + n for n, ok in cs))
+    cs = [("Mesaj Görüntüleme",p.view_channel),("Mesaj Gönderme",p.send_messages),("Embed Bağlantıları",p.embed_links),("Mesaj Yönetimi",p.manage_messages),("Üyeleri Susturma",p.moderate_members),("Rolleri Yönetme",p.manage_roles),("Kanalları Yönetme",p.manage_channels),("Yasaklama",p.ban_members)]
+    eksik = [n for n, ok in cs if not ok]
+    await rp(ctx, head("gear", "YETKİ RAPORU") + "\n\n" + "\n".join((e("check") if ok else e("cross")) + " " + n for n, ok in cs) + ("\n\n⚠️ Eksikler var! Katre rolüne bu izinleri ver veya 'Yönetici' yetkisini tanımla." if eksik else "\n\n✅ Tüm gerekli yetkilere sahipsin."))
 
 @kategori("mod")
-@bot.command(name="yasakla", aliases=["ban"], help="<@üye> [sebep]")
+@bot.command(name="yasakla", aliases=["ban"], help="<@üye> [sebep] — Üyeyi yasaklar")
 @commands.has_permissions(ban_members=True)
 @commands.bot_has_permissions(ban_members=True)
 async def yasakla(ctx, u: discord.Member, *, s="—"):
-    g = mod_guard(ctx, u, "yasakla")
-    if g: return await rp(ctx, ER("OLMAZ", g))
-    t = head("warn", "ONAY") + "\n\n**" + str(u) + "** banlansın mı?"; v = ConfirmPanel(t); await rp(ctx, t, v); await v.wait()
-    if v.value is None: return await rp(ctx, WN("AŞIM"))
+    g = mod_guard(ctx, u, "yasaklama")
+    if g: return await rp(ctx, ER("İŞLEM ENGELLENDİ", g))
+    t = head("warn", "ONAY BEKLİYOR") + "\n\nGerçekten **" + str(u) + "** adlı üyeyi yasaklamak istiyor musun?\nBu işlem geri alınamaz ve DM'i kapatılır."; v = ConfirmPanel(t); await rp(ctx, t, v); await v.wait()
+    if v.value is None: return await rp(ctx, WN("ZAMAN AŞIMI", "Onay verilmediği için işlem iptal edildi."))
     if v.value:
-        try: await u.send(ER("BAN", ctx.guild.name))
+        try: await u.send(ER("YASAKLANDIN", "**" + ctx.guild.name + "** sunucusundan yasaklandın.\nSebep: " + s))
         except Exception: pass
         await u.ban(reason=str(ctx.author)); punish_log(ctx.guild.id, u.id, "BAN", s, ctx.author.id)
-        await guild_log_send(ctx.guild, head("hammer", "BAN") + "\n\n" + u.mention); await rp(ctx, OK("YASAKLANDI", u.mention))
+        await guild_log_send(ctx.guild, head("hammer", "YASAKLAMA") + "\n\n" + u.mention + " yasaklandı.\nYetkili: " + ctx.author.mention + "\nSebep: " + s); await rp(ctx, OK("BAŞARIYLA YASAKLANDI", "**" + str(u) + "** sunucudan kalıcı olarak yasaklandı.\nSebep: `" + s + "`"))
 @kategori("mod")
-@bot.command(name="at", aliases=["kick"], help="<@üye> [sebep]")
+@bot.command(name="at", aliases=["kick"], help="<@üye> [sebep] — Üyeyi sunucudan atar")
 @commands.has_permissions(kick_members=True)
 @commands.bot_has_permissions(kick_members=True)
 async def at(ctx, u: discord.Member, *, s="—"):
-    g = mod_guard(ctx, u, "at")
-    if g: return await rp(ctx, ER("OLMAZ", g))
-    t = head("warn", "ONAY") + "\n\n**" + str(u) + "** atılsın mı?"; v = ConfirmPanel(t); await rp(ctx, t, v); await v.wait()
-    if v.value is None: return await rp(ctx, WN("AŞIM"))
+    g = mod_guard(ctx, u, "atma")
+    if g: return await rp(ctx, ER("İŞLEM ENGELLENDİ", g))
+    t = head("warn", "ONAY BEKLİYOR") + "\n\n**" + str(u) + "** üyesini sunucudan çıkarmak istediğine emin misin?"; v = ConfirmPanel(t); await rp(ctx, t, v); await v.wait()
+    if v.value is None: return await rp(ctx, WN("ZAMAN AŞIMI", "İşlem onaylanmadığı için durduruldu."))
     if v.value:
         await u.kick(reason=str(ctx.author)); punish_log(ctx.guild.id, u.id, "KICK", s, ctx.author.id)
-        await guild_log_send(ctx.guild, head("kick", "KICK") + "\n\n" + u.mention); await rp(ctx, OK("ATILDI", u.mention))
+        await guild_log_send(ctx.guild, head("kick", "SUNUCUDAN ATILDI") + "\n\n" + u.mention + " çıkarıldı.\nYetkili: " + ctx.author.mention); await rp(ctx, OK("BAŞARIYLA ÇIKARILDI", "**" + str(u) + "** sunucudan atıldı.\nSebep: `" + s + "`"))
 @kategori("mod")
-@bot.command(name="mute", aliases=["sustur"], help="<@üye> <süre> [sebep]")
+@bot.command(name="mute", aliases=["sustur"], help="<@üye> <süre> [sebep] — Üyeyi susturur")
 @commands.has_permissions(moderate_members=True)
 @commands.bot_has_permissions(moderate_members=True)
 async def mute(ctx, u: discord.Member, süre: str, *, s="—"):
-    g = mod_guard(ctx, u, "sustur")
-    if g: return await rp(ctx, ER("OLMAZ", g))
+    g = mod_guard(ctx, u, "susturma")
+    if g: return await rp(ctx, ER("İŞLEM ENGELLENDİ", g))
     try: dk = parse_sure(süre)
-    except Exception: return await rp(ctx, ER("SÜRE", "30m / 1h / 2d"))
-    if dk < 1 or dk > 40320: return await rp(ctx, ER("SÜRE", "1dk-28gün"))
+    except Exception: return await rp(ctx, ER("GEÇERSİZ SÜRE FORMATI", "Örnekler: `30m` (dakika), `1h` (saat), `2d` (gün)."))
+    if dk < 1 or dk > 40320: return await rp(ctx, ER("SINIR DIŞI SÜRE", "Minimum 1 dakika, maksimum 28 gün (Discord limiti) olabilir."))
     await u.timeout(datetime.timedelta(minutes=dk), reason=str(ctx.author)); punish_log(ctx.guild.id, u.id, "MUTE", s, ctx.author.id, dk)
-    await guild_log_send(ctx.guild, head("lock", "MUTE") + "\n\n" + u.mention + " › **" + süre + "**"); await rp(ctx, OK("SUSTURULDU", u.mention + " › **" + süre + "**"))
+    await guild_log_send(ctx.guild, head("lock", "SUSTURMA") + "\n\n" + u.mention + " susturuldu.\nSüre: **" + sure_txt(dk) + "**\nYetkili: " + ctx.author.mention); await rp(ctx, OK("SUSTURULDU", "**" + str(u) + "** üyesi **" + sure_txt(dk) + "** boyunca susturuldu.\nSebep: `" + s + "`"))
 @kategori("mod")
-@bot.command(name="unmute", help="<@üye>")
+@bot.command(name="unmute", help="<@üye> — Susturmayı kaldırır")
 @commands.has_permissions(moderate_members=True)
 @commands.bot_has_permissions(moderate_members=True)
 async def unmute(ctx, u: discord.Member):
-    await u.timeout(None); punish_log(ctx.guild.id, u.id, "UNMUTE", "-", ctx.author.id); await rp(ctx, OK("SUSTURMA KALDIRILDI", u.mention))
+    await u.timeout(None); punish_log(ctx.guild.id, u.id, "UNMUTE", "-", ctx.author.id); await rp(ctx, OK("SUSTURMA KALDIRILDI", "**" + str(u) + "** tekrar konuşabilir durumda."))
 @kategori("mod")
-@bot.command(name="ceza-sistemi", help="<ayarla a b|kapat|bilgi>")
+@bot.command(name="ceza-sistemi", help="<ayarla a b|kapat|bilgi> — Oto-ceza kuralları")
 @commands.has_permissions(administrator=True)
 async def ceza_sistemi(ctx, i: str = "bilgi", a: int = 3, b: int = 5):
     i = i.lower()
     if i in ("ayarla","aç"):
         db.q("INSERT OR REPLACE INTO punish_config(guild_id,mute_at,ban_at) VALUES(?,?,?)", (ctx.guild.id, a, b))
-        await rp(ctx, OK("CEZA SİSTEMİ", "**" + str(a) + " uyarı → 1s mute**\n**" + str(b) + " uyarı → ban**"))
+        await rp(ctx, OK("CEZA SİSTEMİ AKTİF", "Kurallar kaydedildi:\n• **" + str(a) + " uyarı** alınca otomatik **1 saat mute** uygulanacak.\n• **" + str(b) + " uyarı** alınca otomatik **ban**lenecek."))
     elif i in ("kapat","off"):
-        db.q("DELETE FROM punish_config WHERE guild_id=?", (ctx.guild.id,)); await rp(ctx, OK("KAPALI"))
+        db.q("DELETE FROM punish_config WHERE guild_id=?", (ctx.guild.id,)); await rp(ctx, OK("KAPATILDI", "Otomatik cezalandırma sistemi devre dışı bırakıldı."))
     else:
         c = db.one("SELECT * FROM punish_config WHERE guild_id=?", (ctx.guild.id,))
-        await rp(ctx, head("shield", "CEZA SİSTEMİ") + "\n\n" + ((str(c["mute_at"]) + " uyarı → mute • " + str(c["ban_at"]) + " uyarı → ban") if c else "Kapalı. Kur: `k!ceza-sistemi ayarla 3 5`"))
+        await rp(ctx, head("shield", "OTO-CEZA DURUMU") + "\n\n" + (("Aktif!\n• " + str(c["mute_at"]) + " uyarı → Mute\n• " + str(c["ban_at"]) + " uyarı → Ban") if c else "Pasif. Etkinleştirmek için: `k!ceza-sistemi ayarla 3 5`"))
 @kategori("mod")
-@bot.command(name="ceza-geçmişi", aliases=["cezalar","sicil"], help="[<@üye>]")
+@bot.command(name="ceza-geçmişi", aliases=["cezalar","sicil"], help="[<@üye>] — Sicil kaydını getirir")
 @commands.has_permissions(manage_messages=True)
 async def ceza_geçmişi(ctx, u: discord.Member = None):
     u = u or ctx.author
     rs = db.all("SELECT * FROM punishments WHERE guild_id=? AND user_id=? ORDER BY id DESC LIMIT 10", (ctx.guild.id, u.id))
-    if not rs: return await rp(ctx, OK("TEMİZ SİCİL", u.mention))
-    await rp(ctx, head("log", u.display_name + " SİCİL") + "\n\n" + "\n".join(e("arrow") + " **" + r["type"] + "** › " + r["ts"][:10] for r in rs))
+    if not rs: return await rp(ctx, INFO("TEMİZ SİCİL", "**" + str(u) + "** kullanıcısının geçmişte hiçbir cezası yoktur."))
+    await rp(ctx, head("log", u.display_name + " SİCİL GEÇMİŞİ") + "\n\n" + "\n".join(e("arrow") + " **" + r["type"] + "** › " + r["ts"][:10] + " (" + (r["reason"] or "-") + ")" for r in rs))
 @kategori("mod")
-@bot.command(name="unban", help="<id> [sebep]")
+@bot.command(name="unban", help="<id> [sebep] — Yasak kalktırmak")
 @commands.has_permissions(ban_members=True)
 @commands.bot_has_permissions(ban_members=True)
 async def unban(ctx, uid: int, *, s="—"):
     try: b = await ctx.guild.fetch_ban(discord.Object(id=uid))
-    except discord.NotFound: return await rp(ctx, ER("YOK"))
-    except Exception: return await rp(ctx, ER("HATA"))
-    await ctx.guild.unban(b.user, reason=str(ctx.author)); await rp(ctx, OK("UNBAN", str(b.user)))
+    except discord.NotFound: return await rp(ctx, ER("BULUNAMADI", "Bu ID'ye sahip aktif bir yasak bulunamadı."))
+    except Exception: return await rp(ctx, ER("HATA", "Kullanıcı çekilemedi. ID doğru mu?"))
+    await ctx.guild.unban(b.user, reason=str(ctx.author)); await rp(ctx, OK("YASAK KALDIRILDI", "**" + str(b.user) + "** tekrar sunucuya katılabilir."))
 @kategori("mod")
-@bot.command(name="banlist", help="Banlılar")
+@bot.command(name="banlist", help="Sunucudaki tüm yasaklıları listeler")
 @commands.has_permissions(ban_members=True)
 async def banlist(ctx):
     bs = [b async for b in ctx.guild.bans()]
-    if not bs: return await rp(ctx, OK("BOŞ", "Banlı kullanıcı yok."))
-    await rp(ctx, head("hammer", "BAN (" + str(len(bs)) + ")") + "\n\n" + "\n".join(e("arrow") + " " + str(b.user) + " `" + str(b.user.id) + "`" for b in bs[:15]))
+    if not bs: return await rp(ctx, INFO("BOŞ LİSTE", "Bu sunucuda şu an yasaklı kimse yok."))
+    await rp(ctx, head("hammer", "YASAKLI LİSTESİ (" + str(len(bs)) + ")") + "\n\n" + "\n".join(e("arrow") + " " + str(b.user) + " `" + str(b.user.id) + "`" for b in bs[:15]) + ("\n...ve diğerleri." if len(bs)>15 else ""))
 @kategori("mod")
-@bot.command(name="nick", help="<@üye> <nick>")
+@bot.command(name="nick", help="<@üye> <takma ad> — Nickname değiştirir")
 @commands.has_permissions(manage_nicknames=True)
 @commands.bot_has_permissions(manage_nicknames=True)
 async def nick(ctx, u: discord.Member, *, n):
-    g = mod_guard(ctx, u, "nick")
-    if g: return await rp(ctx, ER("OLMAZ", g))
-    await u.edit(nick=n[:32]); await rp(ctx, OK("NICK", u.mention + " → `" + n[:32] + "`"))
+    g = mod_guard(ctx, u, "nickname değişikliği")
+    if g: return await rp(ctx, ER("İŞLEM ENGELLENDİ", g))
+    await u.edit(nick=n[:32]); await rp(ctx, OK("NICKNAME DEĞİŞTİ", "**" + str(u) + "** takma adı güncellendi:\nEski: `" + str(u.nick or u.name) + "` → Yeni: `" + n[:32] + "`"))
 @kategori("mod")
-@bot.command(name="nicksıfırla", help="<@üye>")
+@bot.command(name="nicksıfırla", help="<@üye> — Takma adı temizler")
 @commands.has_permissions(manage_nicknames=True)
 async def nicksıfırla(ctx, u: discord.Member):
     g = mod_guard(ctx, u, "işlem")
-    if g: return await rp(ctx, ER("OLMAZ", g))
-    await u.edit(nick=None); await rp(ctx, OK("NICK", u.mention + " sıfırlandı"))
+    if g: return await rp(ctx, ER("İŞLEM ENGELLENDİ", g))
+    await u.edit(nick=None); await rp(ctx, OK("NICK TEMİZLENDİ", "**" + str(u) + "** artık orijinal Discord adıyla görünüyor."))
 @kategori("mod")
-@bot.command(name="rolbilgi", help="<@rol>")
+@bot.command(name="rolbilgi", help="<@rol> — Rol detayları")
 async def rolbilgi(ctx, role: discord.Role):
-    await rp(ctx, head("shield", role.name) + "\n\n" + KV([(e("dot")+"ID", role.id), (e("dot")+"Üye", len(role.members)), (e("dot")+"Renk", str(role.color))]))
+    await rp(ctx, head("shield", role.name) + "\n\n" + KV([(e("dot")+"Rol ID", role.id), (e("dot")+"Üye Sayısı", len(role.members)), (e("dot")+"Renk Kodu", str(role.color)), (e("dot")+"Ayrı Tutulsun?", "Evet" if role.hoist else "Hayır")]))
 @kategori("mod")
-@bot.command(name="uyar", aliases=["warn"], help="<@üye> [sebep]")
+@bot.command(name="uyar", aliases=["warn"], help="<@üye> [sebep] — Uyarı verir (oto-ceza tetikler)")
 @commands.has_permissions(manage_messages=True)
 async def uyar(ctx, u: discord.Member, *, s="—"):
-    if u.id == ctx.author.id: return await rp(ctx, ER("OLMAZ"))
+    if u.id == ctx.author.id: return await rp(ctx, ER("OLMAZ", "Kendini uyaramazsın."))
     ensure_user(u.id, str(u)); db.q("UPDATE users SET warnings=warnings+1 WHERE user_id=?", (u.id,))
     w = db.one("SELECT warnings FROM users WHERE user_id=?", (u.id,))["warnings"]; punish_log(ctx.guild.id, u.id, "WARN", s, ctx.author.id)
     ex = ""; cfg = db.one("SELECT * FROM punish_config WHERE guild_id=?", (ctx.guild.id,))
     if cfg:
-        if w == cfg["ban_at"]:
+        if w >= cfg["ban_at"]:
             try:
-                await u.ban(reason="Oto " + str(w) + " uyarı"); punish_log(ctx.guild.id, u.id, "AUTO-BAN", str(w), ctx.bot.user.id); ex = "\n" + e("hammer") + " **OTO BAN**"
+                await u.ban(reason="Oto-Ceza: " + str(w) + " uyarı"); punish_log(ctx.guild.id, u.id, "AUTO-BAN", str(w), ctx.bot.user.id); ex = "\n\n" + e("hammer") + " **OTO-BAN UYGULANDI!** (" + str(cfg["ban_at"]) + "+ uyarı sınırı aşıldı)"
             except Exception: pass
-        elif w == cfg["mute_at"]:
+        elif w >= cfg["mute_at"]:
             try:
-                await u.timeout(datetime.timedelta(minutes=60), reason="Oto"); punish_log(ctx.guild.id, u.id, "AUTO-MUTE", str(w), ctx.bot.user.id, 60); ex = "\n" + e("lock") + " **OTO 1s MUTE**"
+                await u.timeout(datetime.timedelta(hours=1), reason="Oto-Ceza"); punish_log(ctx.guild.id, u.id, "AUTO-MUTE", str(w), ctx.bot.user.id, 60); ex = "\n\n" + e("lock") + " **OTO-MUTE UYGULANDI!** (1 saat)"
             except Exception: pass
-    await rp(ctx, head("warn", "UYARI") + "\n\n" + u.mention + " → toplam **" + str(w) + "** uyarı" + ex)
+    await rp(ctx, head("warn", "UYARI VERİLDİ") + "\n\n**" + str(u) + "** uyarıldı.\nToplam Uyarısı: **" + str(w) + "**\nSebep: `" + s + "`" + ex)
 @kategori("mod")
-@bot.command(name="uyarılar", aliases=["warns"], help="[<@üye>]")
+@bot.command(name="uyarılar", aliases=["warns"], help="[<@üye>] — Kaç uyarısı olduğunu gösterir")
 async def uyarılar(ctx, u: discord.Member = None):
     u = u or ctx.author; ensure_user(u.id, str(u))
-    await rp(ctx, head("warn", "UYARILAR") + "\n\n" + u.mention + " → **" + str(db.one("SELECT warnings FROM users WHERE user_id=?", (u.id,))["warnings"]) + "** uyarı")
+    cnt = db.one("SELECT warnings FROM users WHERE user_id=?", (u.id,))["warnings"]
+    await rp(ctx, head("warn", "UYARI SAYISI") + "\n\n**" + str(u) + "** kullanıcısının toplam **" + str(cnt) + "** uyarısı bulunmaktadır.")
 @kategori("mod")
-@bot.command(name="temizle", aliases=["purge","sil"], help="<adet>")
+@bot.command(name="temizle", aliases=["purge","sil"], help="<adet> — Kanaldaki mesajları toplu siler")
 @commands.has_permissions(manage_messages=True)
 @commands.bot_has_permissions(manage_messages=True)
 async def temizle(ctx, a: int):
-    if not 1 <= a <= 500: return await rp(ctx, ER("GEÇERSİZ", "1-500"))
-    await ctx.channel.purge(limit=a+1); m = await rp(ctx, OK("TEMİZLENDİ", "**" + str(a) + "** mesaj")); await m.delete(delay=5)
+    if not 1 <= a <= 500: return await rp(ctx, ER("GEÇERSİZ SAYI", "Lütfen 1 ile 500 arasında bir adet belirtin."))
+    await ctx.channel.purge(limit=a+1); m = await rp(ctx, OK("TOPLU SİLME TAMAMLANDI", "**" + str(a) + "** adet mesaj başarıyla silindi.")); await m.delete(delay=5)
 @kategori("mod")
-@bot.command(name="say", help="<metin>")
+@bot.command(name="say", help="<metin> — Bot adına mesaj gönderir")
 @commands.has_permissions(manage_messages=True)
 async def say(ctx, *, m):
     try: await ctx.message.delete()
     except Exception: pass
     await rp(ctx, m[:1900])
 @kategori("mod")
-@bot.command(name="yavaşmod", aliases=["slowmode"], help="<sn>")
+@bot.command(name="yavaşmod", aliases=["slowmode"], help="<saniye> — Kanal yavaş modunu ayarlar")
 @commands.has_permissions(manage_channels=True)
 async def yavaşmod(ctx, s: int):
-    await ctx.channel.edit(slowmode_delay=s); await rp(ctx, OK("YAVAŞ MOD", "**" + str(s) + " sn**"))
+    await ctx.channel.edit(slowmode_delay=s); await rp(ctx, OK("YAVAŞ MOD AYARLANDI", "Kanal hız limiti: **" + str(s) + " saniye** oldu.\n(Kullanıcılar bu süreden sık mesaj atamayacaktır.)"))
 @kategori("mod")
-@bot.command(name="kilit", help="Kilitle")
+@bot.command(name="kilit", help="Kanalı herkesin mesaj atmaya kapatır")
 @commands.has_permissions(manage_channels=True)
 async def kilit(ctx):
-    await ctx.channel.set_permissions(ctx.guild.default_role, send_messages=False); await rp(ctx, OK("KİLİTLİ", ctx.channel.mention))
+    await ctx.channel.set_permissions(ctx.guild.default_role, send_messages=False); await rp(ctx, OK("KANAL KİLİTLENDİ", "#" + ctx.channel.name + " kanalı normal üyelere kapatıldı."))
 @kategori("mod")
-@bot.command(name="kilitaç", aliases=["unlock"], help="Aç")
+@bot.command(name="kilitaç", aliases=["unlock"], help="Kanal kilidini kaldırır")
 @commands.has_permissions(manage_channels=True)
 async def kilitaç(ctx):
-    await ctx.channel.set_permissions(ctx.guild.default_role, send_messages=None); await rp(ctx, OK("AÇIK", ctx.channel.mention))
+    await ctx.channel.set_permissions(ctx.guild.default_role, send_messages=None); await rp(ctx, OK("KANAL AÇILDI", "#" + ctx.channel.name + " tekrardan mesaj almaya başladı."))
 @kategori("mod")
-@bot.command(name="rolver", help="<@rol> <@üye...>")
+@bot.command(name="rolver", help="<@rol> <@üye...> — Çoklu rol dağıtır")
 @commands.has_permissions(manage_roles=True)
 @commands.bot_has_permissions(manage_roles=True)
 async def rolver(ctx, role: discord.Role, ms: commands.Greedy[discord.Member]):
-    if not ms: return await rp(ctx, ER("EKSİK"))
+    if not ms: return await rp(ctx, ER("EKSİK ARGÜMAN", "Lütfen en az bir üye etiketleyin. Örnek: `k!rolver @Moderatör @User`"))
     d = 0
     for m in ms:
         try: await m.add_roles(role); d += 1
         except Exception: pass
-    await rp(ctx, OK("ROL VERİLDİ", role.mention + " → **" + str(d) + "/" + str(len(ms)) + "**"))
+    await rp(ctx, OK("ROL DAĞITIMI", "**" + role.name + "** rolü **" + str(d) + "/" + str(len(ms)) + "** kişiye başarıyla verildi."))
 @kategori("mod")
-@bot.command(name="rolal", help="<@rol> <@üye...>")
+@bot.command(name="rolal", help="<@rol> <@üye...> — Çoklu rol geri alır")
 @commands.has_permissions(manage_roles=True)
 @commands.bot_has_permissions(manage_roles=True)
 async def rolal(ctx, role: discord.Role, ms: commands.Greedy[discord.Member]):
-    if not ms: return await rp(ctx, ER("EKSİK"))
+    if not ms: return await rp(ctx, ER("EKSİK ARGÜMAN", "Lütfen hedef üyeleri etiketleyin."))
     d = 0
     for m in ms:
         try: await m.remove_roles(role); d += 1
         except Exception: pass
-    await rp(ctx, OK("ROL ALINDI", role.mention + " ← **" + str(d) + "/" + str(len(ms)) + "**"))
+    await rp(ctx, OK("ROL GERİ ALINDI", "**" + role.name + "** rolü **" + str(d) + "/" + str(len(ms)) + "** kişiden alındı."))
 @kategori("mod")
-@bot.command(name="herkeserol", help="<@rol>")
+@bot.command(name="herkeserol", help="<@rol> — Tüm üyelere rol verir (Riskli!)")
 @commands.has_permissions(administrator=True)
 @commands.bot_has_permissions(manage_roles=True)
 async def herkeserol(ctx, role: discord.Role):
-    t = head("warn", "ONAY") + "\n\nTüm üyelere " + role.mention + " verilsin mi?"; v = ConfirmPanel(t, 60); await rp(ctx, t, v); await v.wait()
-    if not v.value: return await rp(ctx, WN("İPTAL"))
+    t = head("warn", "TEHLİKELİ İŞLEM ONAYI") + "\n\nTüm sunucu üyelerine **" + role.name + "** rolü verilecek.\nBu işlem uzun sürebilir ve geri alınamaz. Emin misiniz?"; v = ConfirmPanel(t, 60); await rp(ctx, t, v); await v.wait()
+    if not v.value: return await rp(ctx, WN("VAZGEÇİLDİ", "İşlem iptal edildi."))
     d = 0
     for m in ctx.guild.members:
         if m.bot: continue
         try: await m.add_roles(role); d += 1
         except Exception: pass
-    await rp(ctx, OK("DAĞITIM", role.mention + " → **" + str(d) + "** üye"))
+    await rp(ctx, OK("TOPLU ROL VERİLDİ", "**" + role.name + "** rolü toplam **" + str(d) + "** gerçek üyeye dağıtıldı."))
 @kategori("mod")
-@bot.command(name="otorol", help="<@rol|kapat>")
+@bot.command(name="otorol", help="<@rol|kapat> — Yeni gelenlere otomatik rol")
 @commands.has_permissions(administrator=True)
 async def otorol(ctx, *, arg):
     ensure_server(ctx.guild.id)
     if arg.lower() in ("kapat","off","0"):
-        db.q("UPDATE servers SET auto_role=NULL WHERE guild_id=?", (ctx.guild.id,)); return await rp(ctx, OK("OTOROL KAPALI"))
+        db.q("UPDATE servers SET auto_role=NULL WHERE guild_id=?", (ctx.guild.id,)); return await rp(ctx, OK("OTOROL KAPATILDI", "Yeni gelenler artık otomatik rol almayacak."))
     role = await commands.RoleConverter().convert(ctx, arg)
-    db.q("UPDATE servers SET auto_role=? WHERE guild_id=?", (role.id, ctx.guild.id)); await rp(ctx, OK("OTOROL", role.mention))
+    db.q("UPDATE servers SET auto_role=? WHERE guild_id=?", (role.id, ctx.guild.id)); await rp(ctx, OK("OTOROL AYARLANDI", "Sunucuya yeni katılan herkes otomatik olarak **" + role.name + "** rolünü alacak."))
 @kategori("mod")
-@bot.command(name="hoşgeldin", aliases=["hosgeldin"], help="<#kanal|kapat>")
+@bot.command(name="hoşgeldin", aliases=["hosgeldin"], help="<#kanal|kapat> — Hoş geldin mesajı kanalı")
 @commands.has_permissions(administrator=True)
 async def hoşgeldin(ctx, ch: discord.TextChannel = None):
     ensure_server(ctx.guild.id)
     if ch is None:
-        db.q("UPDATE servers SET welcome_ch=NULL WHERE guild_id=?", (ctx.guild.id,)); return await rp(ctx, OK("HOŞGELDİN KAPALI"))
-    db.q("UPDATE servers SET welcome_ch=? WHERE guild_id=?", (ch.id, ctx.guild.id)); await rp(ctx, OK("HOŞGELDİN", ch.mention))
+        db.q("UPDATE servers SET welcome_ch=NULL WHERE guild_id=?", (ctx.guild.id,)); return await rp(ctx, OK("HOŞGELDİN KAPATILDI", "Artık yeni üyeler karşilanmayacak."))
+    db.q("UPDATE servers SET welcome_ch=? WHERE guild_id=?", (ch.id, ctx.guild.id)); await rp(ctx, OK("HOŞGELDİN AYARLANDI", "Yeni üyeler karşılanma mesajını **#" + ch.name + "** kanalından görecektir."))
 @kategori("mod")
-@bot.command(name="butonrol", aliases=["rolmenü"], help="<@rol...>")
+@bot.command(name="butonrol", aliases=["rolmenü"], help="<@rol...> — Kendinden seçmeli rol paneli")
 @commands.has_permissions(administrator=True)
 async def butonrol(ctx, rs: commands.Greedy[discord.Role], *, a="Rolünü seç!"):
-    if not rs or len(rs) > 25: return await rp(ctx, ER("GEÇERSİZ", "1-25 rol"))
+    if not rs or len(rs) > 25: return await rp(ctx, ER("GEÇERSİZ LİSTE", "Lütfen 1 ile 25 arasında rol etiketleyin."))
     mid = str(random.randint(10**11, 10**12-1))
     db.q("INSERT OR REPLACE INTO role_menus(menu_id,guild_id,role_ids) VALUES(?,?,?)", (mid, ctx.guild.id, json.dumps([r.id for r in rs])))
-    t = head("shield", "ROL MENÜSÜ") + "\n\n" + a; v = RoleMenuPanel(mid, [(r.id, r.name) for r in rs], t); bot.add_view(v); await rp(ctx, t, v)
+    t = head("shield", "ROL SEÇİM PANELİ") + "\n\n" + a; v = RoleMenuPanel(mid, [(r.id, r.name) for r in rs], t); bot.add_view(v); await rp(ctx, t, v)
 @kategori("mod")
-@bot.command(name="koruma", help="<mod> <aç/kapat>")
+@bot.command(name="koruma", help="<modül> <aç/kapat> — Spam/Flood/Raid korumaları")
 @commands.has_permissions(administrator=True)
 async def koruma(ctx, md: str, d: str):
     md = md.lower().replace("-","").replace("_","")
     col = {"antispam":"anti_spam","antiflood":"anti_flood","antiraid":"anti_raid","antilink":"anti_link","badword":"badword","küfür":"badword"}.get(md)
-    if not col: return await rp(ctx, ER("MODÜL", "antispam / antiflood / antiraid / antilink / badword"))
+    if not col: return await rp(ctx, ER("MODÜL TANINSIZ", "Geçerli modüller: `antispam`, `antiflood`, `antiraid`, `antilink`, `badword`"))
     db.q("INSERT OR IGNORE INTO protections(guild_id) VALUES(?)", (ctx.guild.id,))
     v = 1 if d.lower() in ("aç","ac","on","1") else 0
     db.q("UPDATE protections SET " + col + "=? WHERE guild_id=?", (v, ctx.guild.id))
-    await rp(ctx, OK("KORUMA: " + md.upper(), "AÇIK " + e("check") if v else "KAPALI " + e("cross")))
+    await rp(ctx, OK("KORUMA GÜNCELLENDİ", "**" + md.upper() + "** koruması **" + ("AÇILDI ✅" if v else "KAPATILDI ❌") + "**."))
 @kategori("mod")
-@bot.command(name="korumadurum", help="Durum")
+@bot.command(name="korumadurum", help="Aktif koruma modüllerini listeler")
 async def korumadurum(ctx):
     p = db.one("SELECT * FROM protections WHERE guild_id=?", (ctx.guild.id,)) or {}
-    f = lambda v: e("check") if v else e("cross")
-    await rp(ctx, head("shield", "KORUMA DURUMU") + "\n\n" + KV([(f(p.get("anti_spam"))+"Spam", "─"), (f(p.get("anti_flood"))+"Flood", "─"), (f(p.get("anti_raid"))+"Raid", "─"), (f(p.get("anti_link"))+"Link", "─"), (f(p.get("badword"))+"Küfür", "─")]))
+    f = lambda v: e("check") + " Aktif" if v else e("cross") + " Pasif"
+    await rp(ctx, head("shield", "GÜVENLİK DUVARI DURUMU") + "\n\n" + KV([(f(p.get("anti_spam"))+"Anti-Spam", ""), (f(p.get("anti_flood"))+"Anti-Flood", ""), (f(p.get("anti_raid"))+"Anti-Raid", ""), (f(p.get("anti_link"))+"Anti-Link", ""), (f(p.get("badword"))+"Küfür Filtresi", "")]))
 @kategori("mod")
-@bot.command(name="korumalog", help="<#kanal>")
+@bot.command(name="korumalog", help="<#kanal> — Güvenlik olaylarının loglanacağı kanal")
 @commands.has_permissions(administrator=True)
 async def korumalog(ctx, ch: discord.TextChannel):
-    db.q("INSERT OR IGNORE INTO protections(guild_id) VALUES(?)", (ctx.guild.id,)); db.q("UPDATE protections SET log_ch=? WHERE guild_id=?", (ch.id, ctx.guild.id)); await rp(ctx, OK("KORUMA LOG", ch.mention))
+    db.q("INSERT OR IGNORE INTO protections(guild_id) VALUES(?)", (ctx.guild.id,)); db.q("UPDATE protections SET log_ch=? WHERE guild_id=?", (ch.id, ctx.guild.id)); await rp(ctx, OK("LOG KANALI BELİRLENDİ", "Spam/Küfür gibi güvenlik ihlalleri bundan böyle **#"+ch.name+"** kanalına düşecektir."))
 @kategori("mod")
-@bot.command(name="badword", help="<ekle/sil/liste> [kelime]")
+@bot.command(name="badword", help="<ekle/sil/liste> [kelime] — Küfür filtresi yönetimi")
 @commands.has_permissions(administrator=True)
 async def badword(ctx, i: str, *, k=None):
     g = ctx.guild.id
     if i.lower() in ("ekle","add"):
-        if not k: return await rp(ctx, ER("KELİME GİR"))
-        db.q("INSERT OR IGNORE INTO badwords(guild_id,word) VALUES(?,?)", (g, k.lower())); await rp(ctx, OK("FİLTRE +", "`" + k.lower() + "`"))
+        if not k: return await rp(ctx, ER("BOŞ KELİME", "Lütfen filtrelenecek kelimeyi yazın. Örnek: `k!badword ekle salak`"))
+        db.q("INSERT OR IGNORE INTO badwords(guild_id,word) VALUES(?,?)", (g, k.lower())); await rp(ctx, OK("FİLTRE EKLENDİ", "`" + k.lower() + "` kelimesi kara listeye alındı. Bu kelimeyi içeren mesajlar silinip 1 dk mute yiyecektir."))
     elif i.lower() in ("sil","remove"):
-        db.q("DELETE FROM badwords WHERE guild_id=? AND word=?", (g, (k or "").lower())); await rp(ctx, OK("FİLTRE -"))
+        db.q("DELETE FROM badwords WHERE guild_id=? AND word=?", (g, (k or "").lower())); await rp(ctx, OK("FİLTRE SİLİNDİ", "`" + (k or "?") + "` listeden çıkarıldı."))
     else:
         ws = [w["word"] for w in db.all("SELECT word FROM badwords WHERE guild_id=?", (g,))]
-        await rp(ctx, head("warn", "YASAKLI KELİMELER") + "\n\n" + ("`" + "`, `".join(ws) + "`" if ws else "Boş"))
+        await rp(ctx, head("warn", "YASAKLI KELİMELER") + "\n\n" + ("`" + "`, `".join(ws) + "`" if ws else "Liste boş."))
 @kategori("mod")
-@bot.command(name="raidmodu", help="<aç/kapat>")
+@bot.command(name="raidmodu", help="<aç/kapat> — Acil Raid Kilidi")
 @commands.has_permissions(administrator=True)
 async def raidmodu(ctx, m: str):
     db.q("INSERT OR IGNORE INTO protections(guild_id) VALUES(?)", (ctx.guild.id,))
     if m.lower() in ("aç","ac","on"):
-        db.q("UPDATE protections SET raid_until=? WHERE guild_id=?", (datetime.datetime.now().timestamp()+600, ctx.guild.id)); await rp(ctx, OK("RAID MODU", "10 dk boyunca yeni girişler engelli"))
+        db.q("UPDATE protections SET raid_until=? WHERE guild_id=?", (datetime.datetime.now().timestamp()+600, ctx.guild.id)); await rp(ctx, OK("RAID KİLİDİ AÇILDI", "Sonraki **10 dakika** boyunca sunucuya giren herkes otomatik atılacaktır."))
     else:
-        db.q("UPDATE protections SET raid_until=0 WHERE guild_id=?", (ctx.guild.id)); await rp(ctx, OK("RAID KAPALI"))
+        db.q("UPDATE protections SET raid_until=0 WHERE guild_id=?", (ctx.guild.id)); await rp(ctx, OK("NORMAL MODA DÖNÜLDÜ", "Raid kilidi kaldırıldı; girişler serbesttir."))
 @kategori("mod")
-@bot.command(name="kurulum", aliases=["sunucukur","setup"], help="Sunucu kur")
+@bot.command(name="kurulum", aliases=["sunucukur","setup"], help="Sunucuyu baştan aşağı sıfırdan kurar")
 @commands.has_permissions(administrator=True)
 @commands.bot_has_permissions(manage_channels=True, manage_roles=True)
 async def kurulum(ctx):
-    t = head("gear", "SUNUCU KURULUM") + "\n\n4 kategori • 12 kanal • 4 rol. Onaylıyor musun?"; v = ConfirmPanel(t, 60); await rp(ctx, t, v); await v.wait()
-    if not v.value: return
+    t = head("gear", "SIHIRLI KURULUM") + "\n\nSunucunda standart bir yapı oluşturacağım:\n• 4 Kategori (Bilgi, Sohbet, Ses, Yönetim)\n• ~12 Kanal\n• 4 Yetki Rolü\n\nDevam edilsin mi?"; v = ConfirmPanel(t, 60); await rp(ctx, t, v); await v.wait()
+    if not v.value: return await rp(ctx, WN("IPTAL EDİLDİ", "Kurulum vazgeçildi."))
     g = ctx.guild; ck = 0
     try:
         ry = await g.create_role(name="Yönetici", color=discord.Color(0xE74C3C), permissions=discord.Permissions(administrator=True))
@@ -1495,287 +1501,288 @@ async def kurulum(ctx):
         owy = {g.default_role: discord.PermissionOverwrite(view_channel=False), ry: discord.PermissionOverwrite(view_channel=True), rm: discord.PermissionOverwrite(view_channel=True)}
         await g.create_text_channel("yetkili-sohbet", category=k4, overwrites=owy); ck += 1
         ensure_server(g.id); db.q("UPDATE servers SET welcome_ch=? WHERE guild_id=?", (hg.id, g.id))
-        await rp(ctx, OK("KURULUM BİTTİ", str(ck) + " kanal • hoşgeldin: " + hg.mention))
-    except discord.Forbidden: await rp(ctx, ER("YETKİ"))
-    except Exception as ex: await rp(ctx, ER("HATA", str(ex)[:250]))
+        await rp(ctx, OK("KURULUM BAŞARILI", "**" + str(ck) + "** kanal ve roller hazırlandı.\nHoş geldin kanalı: #" + hg.name))
+    except discord.Forbidden: await rp(ctx, ER("YETKİ EKSİK", "Botun kanal/rol yaratma izni yok. Lütfen 'Yönetici' yetkisini verin."))
+    except Exception as ex: await rp(ctx, ER("BEKLENMEDİK HATA", str(ex)[:250]))
 
 @kategori("sys")
-@bot.command(name="kelimekur", help="<#kategori> — Kelime türetme oyunu kurar")
+@bot.command(name="kelimekur", help="<#kategori> — Kelime Türetme Oyunu başlatır")
 @commands.has_permissions(administrator=True)
 @commands.bot_has_permissions(manage_channels=True)
 async def kelimekur(ctx, cat: discord.CategoryChannel):
     ch = discord.utils.get(ctx.guild.text_channels, name="kelime-oyunu")
     if not ch:
         try: ch = await ctx.guild.create_text_channel("kelime-oyunu", category=cat)
-        except Exception: return await rp(ctx, ER("YETKİ", "Kanal açamadım."))
+        except Exception: return await rp(ctx, ER("KANAL AÇILAMADI", "Botun bu kategoride kanal açma izni yok."))
     db.q("INSERT OR REPLACE INTO wordgame(guild_id,channel_id,last_word,last_user,streak) VALUES(?,?,?,?,0)", (ctx.guild.id, ch.id, None, None))
-    await rp_ch(ch, head("game", "KELİME TÜRETME") + "\n\nBir önceki kelimenin **son harfiyle** başlayan bir kelime yaz!\n\n" +
-        e("arrow") + " Örnek: **dünya → arı → ırmak → kaya...**\n" +
-        e("check") + " Doğru kelime = **onay tiki** + 15 coin\n" +
-        e("fire") + " Her 5 seride **+50 bonus coin**\n" +
-        e("cross") + " Yanlış/kural dışı = uyarı mesajı\n\n" + e("spark") + " İlk kelimeyi yazan oyunu başlatır!")
-    await rp(ctx, OK("OYUN KURULDU", ch.mention + "\nDurum: `k!kelimedurum` • Kapat: `k!kelimekapat`"))
+    await rp_ch(ch, head("game", "KELİME TÜRETME OYUNU") + "\n\nBir önceki kelimenin **son harfiyle** başlayan yeni bir Türkçe kelime yaz!\n\n" +
+        e("arrow") + " Örnek akış: **dünya → arı → ırmak → kaya...**\n" +
+        e("check") + " Doğru kelime = Mesajına **Onay Tik'i** gelir + **15 coin** kazanırsın.\n" +
+        e("fire") + " Her **5. doğruda** ekstra **+50 bonus coin**!\n" +
+        e("cross") + " Yanlış/harf tutmazsa uyarı alırsın.\n\n" + e("spark") + " İlk kelimeyi yazarak oyunu başlat!")
+    await rp(ctx, OK("OYUN KURULDU", "Oyun kanalı hazır: **#"+ch.name+"**\nDurum sorgusu: `k!kelimedurum` • Kapatmak: `k!kelimekapat`"))
 @kategori("sys")
-@bot.command(name="kelimekapat", help="Kelime oyununu kapatır")
+@bot.command(name="kelimekapat", help="Kelime oyununu sonlandırır")
 @commands.has_permissions(administrator=True)
 async def kelimekapat(ctx):
     db.q("DELETE FROM wordgame WHERE guild_id=?", (ctx.guild.id,))
-    await rp(ctx, OK("OYUN KAPATILDI", "Kanal duruyor; istersen manuel sil."))
+    await rp(ctx, OK("OYUN KAPATILDI", "Kelime türetme motoru durduruldu. (#kelime-oyunu kanalı silinmedi, dilersen manuel silebilirsin.)"))
 @kategori("sys")
-@bot.command(name="kelimedurum", help="Oyun durumu")
+@bot.command(name="kelimedurum", help="Oyunun anlık durumunu gösterir")
 async def kelimedurum(ctx):
     wg = db.one("SELECT * FROM wordgame WHERE guild_id=?", (ctx.guild.id,))
-    if not wg: return await rp(ctx, ER("KURULU DEĞİL", "`k!kelimekur #kategori`"))
-    await rp(ctx, head("game", "KELİME DURUM") + "\n\n" + KV([(e("dot")+"Kanal", "<#" + str(wg["channel_id"]) + ">"), (e("dot")+"Son kelime", "**" + (wg["last_word"] or "—") + "**"), (e("dot")+"Seri", wg["streak"] or 0), (e("dot")+"Son oyuncu", ("<@" + str(wg["last_user"]) + ">") if wg["last_user"] else "—")]))
+    if not wg: return await rp(ctx, ER("KURULU DEĞİL", "Bu sunucuda aktif bir kelime oyunu yok. Başlatmak için: `k!kelimekur #kategori`"))
+    await rp(ctx, head("game", "OYUN PANOSU") + "\n\n" + KV([(e("dot")+"Kanal", "<#" + str(wg["channel_id"]) + ">"), (e("dot")+"Sıradaki Harf", ("«" + wg["last_word"][-1].upper() + "»" if wg["last_word"] else "Herhangi bir harf")), (e("dot")+"Son Kelime", "**" + (wg["last_word"] or "—") + "**"), (e("dot")+"Aktif Seri", str(wg["streak"] or 0) + " sıra"), (e("dot")+"Son Oyuncu", ("<@" + str(wg["last_user"]) + ">") if wg["last_user"] else "—")]))
 @kategori("sys")
-@bot.command(name="tempvoice", help="[kur|#kanal|kapat]")
+@bot.command(name="tempvoice", help="[kur|#kanal|kapat] — Geçici Ses Odası Sistemi")
 @commands.has_permissions(administrator=True)
 @commands.bot_has_permissions(manage_channels=True, move_members=True)
 async def tempvoice(ctx, *, arg=None):
     if arg and arg.lower() in ("kapat","off","0"):
-        db.q("DELETE FROM tempvoice WHERE guild_id=?", (ctx.guild.id,)); return await rp(ctx, OK("TEMP VOICE KAPALI"))
+        db.q("DELETE FROM tempvoice WHERE guild_id=?", (ctx.guild.id,)); return await rp(ctx, OK("SİSTEM KAPATILDI", "Geçici oda özelliği devre dışı bırakıldı."))
     if arg:
         ch = await commands.VoiceChannelConverter().convert(ctx, arg)
         db.q("INSERT OR REPLACE INTO tempvoice(guild_id,trigger_ch,category_id) VALUES(?,?,?)", (ctx.guild.id, ch.id, ch.category.id if ch.category else None))
-        await rp(ctx, OK("TETİKLEYİCİ", ch.mention))
+        await rp(ctx, OK("TETİKLEYİCİ BELİRLENDİ", "Kullanıcılar **#"+ch.name+"** kanalına girdiğinde kendilerine özel oda açılacaktır."))
     else:
         cat = await ctx.guild.create_category("ÖZEL ODALAR"); trig = await cat.create_voice_channel("➕ Katıl & Oda Kur")
         await trig.set_permissions(ctx.guild.default_role, view_channel=True, connect=True, speak=False)
         db.q("INSERT OR REPLACE INTO tempvoice(guild_id,trigger_ch,category_id) VALUES(?,?,?)", (ctx.guild.id, trig.id, cat.id))
-        await rp(ctx, OK("TEMP VOICE KURULDU", trig.mention))
+        await rp(ctx, OK("SİSTEM KURULDU", "Hazır! İnsanlar **'➕ Katıl & Oda Kur'** kanalına bastığında otomatik kendi odası oluşacak ve panelden yönetebilecekler."))
 @kategori("sys")
-@bot.command(name="ticket", help="<kapat/bilgi/listele>")
+@bot.command(name="ticket", help="<kapat/bilgi/listele> — Talep yönetimi")
 async def ticket(ctx, i: str = "bilgi"):
     i = i.lower(); t = db.one("SELECT * FROM tickets WHERE channel_id=?", (ctx.channel.id,))
     if i == "kapat":
-        if not t: return await rp(ctx, ER("BURASI TICKET DEĞİL"))
-        if not (ctx.author.guild_permissions.administrator or ctx.author.id == t["user_id"]): return await rp(ctx, ER("YETKİ"))
+        if not t: return await rp(ctx, ER("BURASI TICKET DEĞİL", "Bu kanal sistem tarafından oluşturulmamış."))
+        if not (ctx.author.guild_permissions.administrator or ctx.author.id == t["user_id"]): return await rp(ctx, ER("YETKİ YOK", "Sadece talep sahibi veya yönetici kapatabilir."))
         db.q("UPDATE tickets SET status='closed' WHERE channel_id=?", (ctx.channel.id,))
-        await rp(ctx, WN("KAPATILIYOR", "10 sn...")); await asyncio.sleep(10)
+        await rp(ctx, WN("KAPATILIYOR...", "Kanal 10 saniye içinde silinecektir.")); await asyncio.sleep(10)
         try: await ctx.channel.delete()
         except Exception: pass
     elif i == "bilgi":
-        if not t: return await rp(ctx, ER("BURASI TICKET DEĞİL"))
-        await rp(ctx, head("ticket", "TALEP BİLGİSİ") + "\n\n" + KV([(e("dot")+"Kim", "<@"+str(t["user_id"])+">"), (e("dot")+"Üstlenen", ("<@"+str(t["claimed_by"])+">") if t["claimed_by"] else "—")]))
+        if not t: return await rp(ctx, ER("BURASI TICKET DEĞİL", "Geçersiz kanal."))
+        await rp(ctx, head("ticket", "TALEP DETAYLARI") + "\n\n" + KV([(e("dot")+"Talep Eden", "<@"+str(t["user_id"])+">"), (e("dot")+"Ele Alan", ("<@"+str(t["claimed_by"])+">") if t["claimed_by"] else "Henüz kimse üstlenmedi")]))
     elif i == "listele":
-        if not ctx.author.guild_permissions.administrator: return await rp(ctx, ER("YETKİ"))
+        if not ctx.author.guild_permissions.administrator: return await rp(ctx, ER("YETKİ YOK", "Sadece yöneticiler listeleyebilir."))
         rs = db.all("SELECT * FROM tickets WHERE guild_id=? AND status='open'", (ctx.guild.id,))
-        await rp(ctx, head("ticket", "AÇIK TALEPLER") + "\n\n" + ("\n".join(e("arrow") + " <#" + str(r["channel_id"]) + ">" for r in rs) if rs else "Yok"))
-    else: await rp(ctx, ER("KOMUT", "kapat / bilgi / listele"))
+        await rp(ctx, head("ticket", "AÇIK TALEPLER (" + str(len(rs)) + ")") + "\n\n" + ("\n".join(e("arrow") + " <#" + str(r["channel_id"]) + ">" for r in rs) if rs else "Şu an bekleyen talep yok."))
+    else: await rp(ctx, ER("GEÇERSİZ PARAMETRE", "Kullanım: `k!ticket kapat` / `k!ticket bilgi` / `k!ticket listele`"))
 @kategori("sys")
-@bot.command(name="başvuru-ayarla", help="<#log> [@rol]")
+@bot.command(name="başvuru-ayarla", help="<#log> [@rol] — Yetkili başvuru sisteminizi kurar")
 @commands.has_permissions(administrator=True)
 async def başvuru_ayarla(ctx, ch: discord.TextChannel, role: discord.Role = None):
     db.q("INSERT OR REPLACE INTO app_settings(guild_id,log_ch,staff_role) VALUES(?,?,?)", (ctx.guild.id, ch.id, role.id if role else None))
-    await rp(ctx, OK("BAŞVURU SİSTEMİ", ch.mention + "\nPanel: `k!başvuru-panel`"))
+    await rp(ctx, OK("SİSTEM HAZIR", "Başvurular **#"+ch.name+"** kanalına düşecek.\nKabul edilenlere **" + (role.name if role else "belirtilmeyen") + "** rolü otomatik verilecektir.\nPaneli göndermek için: `k!başvuru-panel`"))
 @kategori("sys")
-@bot.command(name="başvuru-panel", help="Panel")
+@bot.command(name="başvuru-panel", help="Yetkili başvuru butonlu panelini gönderir")
 @commands.has_permissions(administrator=True)
 async def başvuru_panel(ctx):
-    t = head("clip", "YETKİLİ BAŞVURU") + "\n\n### Ekibimize katılmak ister misin?\n" + e("check") + " 14+ yaş\n" + e("check") + " Haftada 20+ saat aktif\n" + e("check") + " Discord deneyimi\n\n**Butona tıkla, formu doldur!**"; await rp(ctx, t, AppOpenPanel(t))
+    t = head("clip", "EKİBİMİZE KATIL") + "\n\n### Yetkili olmak ister misin?\n" + e("check") + " 14 yaş ve üzeri\n" + e("check") + " Haftalık düzenli aktiflik\n" + e("check") + " Discord moderasyon deneyimi\n\n**Formu doldurmak için aşağıdaki butona tıkla!**"; await rp(ctx, t, AppOpenPanel(t))
     try: await ctx.message.delete()
     except Exception: pass
 @kategori("sys")
-@bot.command(name="başvurular", help="Bekleyenler")
+@bot.command(name="başvurular", help="Bekleyen başvuruları listeler")
 @commands.has_permissions(administrator=True)
 async def başvurular(ctx):
     rs = db.all("SELECT * FROM applications WHERE guild_id=? AND status='pending'", (ctx.guild.id,))
-    if not rs: return await rp(ctx, OK("BOŞ", "Bekleyen başvuru yok."))
-    await rp(ctx, head("clip", "BEKLEYEN (" + str(len(rs)) + ")") + "\n\n" + "\n".join(e("arrow") + " **#" + str(r["id"]) + "** <@" + str(r["user_id"]) + ">" for r in rs[:10]))
+    if not rs: return await rp(ctx, INFO("BOŞ LİSTE", "Değerlendirilmeyi bekleyen başvuru yok."))
+    await rp(ctx, head("clip", "BEKLEYEN BAŞVURULAR (" + str(len(rs)) + ")") + "\n\n" + "\n".join(e("arrow") + " **#" + str(r["id"]) + "** <@" + str(r["user_id"]) + ">" for r in rs[:10]))
 @kategori("sys")
-@bot.command(name="başvurum", help="Durumun")
+@bot.command(name="başvurum", help="Senin başvurunun durumunu gösterir")
 async def başvurum(ctx):
     r = db.one("SELECT * FROM applications WHERE guild_id=? AND user_id=? ORDER BY id DESC", (ctx.guild.id, ctx.author.id))
-    if not r: return await rp(ctx, ER("BAŞVURUN YOK"))
-    await rp(ctx, head("clip", "BAŞVURU #" + str(r["id"])) + "\n\n**" + r["status"].upper() + "**")
+    if not r: return await rp(ctx, ER("BAŞVURUN YOK", "Daha önce yetkili başvurusu yapmamışsın. Yapmak için `k!başvuru-panel` butonunu kullan."))
+    st = {"pending":"⏳ Bekliyor","accepted":"✅ Kabul Edildi","rejected":"❌ Reddedildi"}[r["status"]]
+    await rp(ctx, head("clip", "BAŞVURU TAKİBİ #" + str(r["id"])) + "\n\nDurum: **" + st + "**\nTarih: " + r["ts"][:10])
 @kategori("sys")
-@bot.command(name="otocevap", help="<ekle/sil/liste>")
+@bot.command(name="otocevap", help="<ekle/sil/liste> — Anahtar kelime bazlı otomatik cevap")
 @commands.has_permissions(administrator=True)
 async def otocevap(ctx, i: str, *, a=None):
     g = ctx.guild.id
     if i.lower() in ("ekle","add"):
-        if not a or "|" not in a: return await rp(ctx, ER("ÖRNEK", "ekle selam | merhaba!"))
+        if not a or "|" not in a: return await rp(ctx, ER("FORMAT HATASI", "Örnek kullanım: `k!otocevap ekle selam | Merhaba, nasılsın?`"))
         t, r = [p.strip() for p in a.split("|", 1)]
-        db.q("INSERT OR REPLACE INTO auto_replies(guild_id,trigger,response) VALUES(?,?,?)", (g, t.lower(), r[:500])); await rp(ctx, OK("OTO CEVAP +", "`" + t.lower() + "`"))
+        db.q("INSERT OR REPLACE INTO auto_replies(guild_id,trigger,response) VALUES(?,?,?)", (g, t.lower(), r[:500])); await rp(ctx, OK("OTO CEVAP EKLENDİ", "Birisi sohbette **" + t.lower() + "** yazarsa bot otomatik cevap verecektir."))
     elif i.lower() in ("sil","remove"):
-        db.q("DELETE FROM auto_replies WHERE guild_id=? AND trigger=?", (g, (a or "").lower())); await rp(ctx, OK("OTO CEVAP -"))
+        db.q("DELETE FROM auto_replies WHERE guild_id=? AND trigger=?", (g, (a or "").lower())); await rp(ctx, OK("SİLİNDİ", "Cevap kuralları arasından çıkarıldı."))
     else:
         rs = db.all("SELECT * FROM auto_replies WHERE guild_id=?", (g,))
-        await rp(ctx, head("robot", "OTO CEVAP (" + str(len(rs)) + ")") + "\n\n" + "\n".join(e("arrow") + " `" + r["trigger"] + "`" for r in rs[:15]))
+        await rp(ctx, head("robot", "OTO CEVAP KURALI (" + str(len(rs)) + ")") + "\n\n" + "\n".join(e("arrow") + " `" + r["trigger"] + "`" for r in rs[:15]))
 @kategori("sys")
-@bot.command(name="sayaç", help="<hedef> <#kanal|kapat>")
+@bot.command(name="sayaç", help="<hedef> <#kanal|kapat> — Üye sayısı kutlaması")
 @commands.has_permissions(administrator=True)
 async def sayaç(ctx, h: int, ch: discord.TextChannel = None):
     if ch is None or h <= 0:
-        db.q("DELETE FROM counters WHERE guild_id=?", (ctx.guild.id,)); return await rp(ctx, OK("SAYAÇ KAPALI"))
-    db.q("INSERT OR REPLACE INTO counters(guild_id,target,channel_id,reached) VALUES(?,?,?,0)", (ctx.guild.id, h, ch.id)); await rp(ctx, OK("SAYAÇ", "Hedef **" + str(h) + "** • " + ch.mention))
+        db.q("DELETE FROM counters WHERE guild_id=?", (ctx.guild.id,)); return await rp(ctx, OK("SAYAÇ KAPATILDI", "Hedef takipçi kutlaması durduruldu."))
+    db.q("INSERT OR REPLACE INTO counters(guild_id,target,channel_id,reached) VALUES(?,?,?,0)", (ctx.guild.id, h, ch.id)); await rp(ctx, OK("SAYAÇ KURULDU", "Sunucu **" + str(h) + "** üyeye ulaştığında **#"+ch.name+"** kanalında büyük kutlama yapılacak! 🎉"))
 @kategori("sys")
-@bot.command(name="seviyerol", help="<ekle/sil/liste> [lv] [@rol]")
+@bot.command(name="seviyerol", help="<ekle/sil/liste> [lv] [@rol] — Seviye ödülü rolleri")
 @commands.has_permissions(administrator=True)
 async def seviyerol(ctx, i: str, s: int = 0, role: discord.Role = None):
     g = ctx.guild.id
     if i.lower() in ("ekle","add"):
-        if not role: return await rp(ctx, ER("ÖRNEK", "ekle 5 @Rol"))
-        db.q("INSERT INTO level_roles(guild_id,level,role_id) VALUES(?,?,?)", (g, s, role.id)); await rp(ctx, OK("SEVİYE ROL +", "Lv**" + str(s) + "** → " + role.mention))
+        if not role: return await rp(ctx, ER("EKSİK ROL", "Örnek: `k!seviyerol ekle 10 @VIP`"))
+        db.q("INSERT INTO level_roles(guild_id,level,role_id) VALUES(?,?,?)", (g, s, role.id)); await rp(ctx, OK("ÖDÜL TANIMLANDI", "Kullanıcılar **Lv " + str(s) + "** olduğunda **" + role.name + "** rolünü otomatik kapacaklardır."))
     elif i.lower() in ("sil","remove"):
-        db.q("DELETE FROM level_roles WHERE guild_id=? AND level=?", (g, s)); await rp(ctx, OK("SEVİYE ROL -", "Lv" + str(s)))
+        db.q("DELETE FROM level_roles WHERE guild_id=? AND level=?", (g, s)); await rp(ctx, OK("SİLİNDİ", "Seviye " + str(s) + " ödülü kaldırıldı."))
     else:
         rs = db.all("SELECT * FROM level_roles WHERE guild_id=? ORDER BY level", (g,))
-        await rp(ctx, head("chartup", "SEVİYE ROLLERİ") + "\n\n" + ("\n".join(e("arrow") + " Lv**" + str(r["level"]) + "** → <@&" + str(r["role_id"]) + ">" for r in rs) if rs else "Yok"))
+        await rp(ctx, head("chartup", "SEVİYE ÖDÜLLERİ") + "\n\n" + ("\n".join(e("arrow") + " Lv**" + str(r["level"]) + "** → <@&" + str(r["role_id"]) + ">" for r in rs) if rs else "Tanımlı ödül yok."))
 @kategori("sys")
-@bot.command(name="sunuculog", help="<#kanal|kapat>")
+@bot.command(name="sunuculog", help="<#kanal|kapat> — Silinen/Düzenlenen mesaj logları")
 @commands.has_permissions(administrator=True)
 async def sunuculog(ctx, ch: discord.TextChannel = None):
     if ch is None:
-        db.q("DELETE FROM guild_logs WHERE guild_id=?", (ctx.guild.id,)); return await rp(ctx, OK("LOG KAPALI"))
-    db.q("INSERT OR REPLACE INTO guild_logs(guild_id,channel_id) VALUES(?,?)", (ctx.guild.id, ch.id)); await rp(ctx, OK("LOG", ch.mention))
+        db.q("DELETE FROM guild_logs WHERE guild_id=?", (ctx.guild.id,)); return await rp(ctx, OK("LOG KAPATILDI", "Mesaj denetim kaydı durduruldu."))
+    db.q("INSERT OR REPLACE INTO guild_logs(guild_id,channel_id) VALUES(?,?)", (ctx.guild.id, ch.id)); await rp(ctx, OK("DENETİM LOGU AÇILDI", "Silinen mesajlar ve nickname değişiklikleri gizlice **#"+ch.name+"** kanalına kaydedilecektir."))
 
 @kategori("eco")
-@bot.command(name="cüzdan", aliases=["balance","para"], help="Cüzdan")
+@bot.command(name="cüzdan", aliases=["balance","para"], help="[<@üye>] — Coin ve varlık durumu")
 async def cüzdan(ctx, u: discord.Member = None):
     u = u or ctx.author; ensure_user(u.id, str(u)); d = db.one("SELECT * FROM users WHERE user_id=?", (u.id,))
-    await rp(ctx, head("money", u.display_name + " CÜZDAN") + "\n\n" + KV([(e("coin")+"Coin", d["coins"]), (e("star")+"İtibar", d["rep"]), (e("pro")+"Pro", "✅" if d["pro"] else "❌")]))
+    await rp(ctx, head("money", u.display_name + " CÜZDANI") + "\n\n" + KV([(e("coin")+"Mevcut Coin", d["coins"]), (e("star")+"Toplam İtibar", d["rep"]), (e("pro")+"Pro Aboneliği", "✅ Aktif" if d["pro"] else "❌ Yok")]))
 @kategori("eco")
-@bot.command(name="zenginler", aliases=["coinlb"], help="Coin top")
+@bot.command(name="zenginler", aliases=["coinlb"], help="En zengin 10 kullanıcı")
 async def zenginler(ctx):
     rs = db.all("SELECT * FROM users ORDER BY coins DESC LIMIT 10")
-    if not rs: return await rp(ctx, ER("VERİ YOK"))
-    md = ["🥇","🥈","🥉"]
-    await rp(ctx, head("coin", "EN ZENGİNLER") + "\n\n" + "\n".join((md[i] if i < 3 else "**" + str(i+1) + ".**") + " <@" + str(r["user_id"]) + "> ─ **" + str(r["coins"]) + "**" for i, r in enumerate(rs)))
+    if not rs: return await rp(ctx, WN("VERİ YOK", "Ekonomi henüz başlamadı."))
+    md = ["🥇","","🥉"]
+    await rp(ctx, head("coin", "SERVET SIRALAMASI") + "\n\n" + "\n".join((md[i] if i < 3 else "**" + str(i+1) + ".**") + " <@" + str(r["user_id"]) + "> ─ **" + str(r["coins"]) + "** coin" for i, r in enumerate(rs)))
 @kategori("eco")
-@bot.command(name="günlük", aliases=["gunluk","daily"], help="Günlük")
+@bot.command(name="günlük", aliases=["gunluk","daily"], help="Günlük ücretsiz coin paketini topla")
 @commands.cooldown(1, 86400, commands.BucketType.user)
 async def günlük(ctx):
     ensure_user(ctx.author.id, str(ctx.author)); u = db.one("SELECT * FROM users WHERE user_id=?", (ctx.author.id,))
     b = random.randint(150, 400) + (250 if u["pro"] else 0); db.q("UPDATE users SET coins=coins+? WHERE user_id=?", (b, ctx.author.id))
-    await rp(ctx, head("gift", "GÜNLÜK ÖDÜL") + "\n\n**+" + str(b) + " coin**" + (" (" + e("pro") + " bonus dahil)" if u["pro"] else ""))
+    await rp(ctx, head("gift", "GÜNLÜK PAKET") + "\n\n**+" + str(b) + " coin** hesabına yatırıldı!" + (" (" + e("pro") + " +%25 bonus dahil)" if u["pro"] else "") + "\n\nBir dahaki sefere yarın tekrar gelebilirsin.")
 @kategori("eco")
-@bot.command(name="çalış", aliases=["calis","work"], help="Çalış")
+@bot.command(name="çalış", aliases=["calis","work"], help="Yarı zamanlı iş yaparak para kazan (30 dk bekleme)")
 @commands.cooldown(1, 1800, commands.BucketType.user)
 async def çalış(ctx):
-    j, a, b = random.choice([("Yazılım",200,400),("Tasarım",150,300),("İçerik",180,350),("Pizzacı",100,220),("Şoför",120,260)])
+    j, a, b = random.choice([("Yazılım Geliştirici",200,400),("Grafik Tasarımcı",150,300),("Video Editörü",180,350),("Restoran Garsonu",100,220),("Taksi Şoförü",120,260)])
     p = random.randint(a, b); db.q("UPDATE users SET coins=coins+? WHERE user_id=?", (p, ctx.author.id))
-    await rp(ctx, head("gear", "ÇALIŞTIN") + "\n\n**" + j + "** → +" + str(p) + " coin")
+    await rp(ctx, head("gear", "ÇALIŞMA RAPORU") + "\n\nBugün **" + j + "** olarak ter döktün.\nKarşılığında **+" + str(p) + " coin** kazandın!\n\n(Yarım saat sonra tekrar çalışabilirsin.)")
 @kategori("eco")
-@bot.command(name="balık", aliases=["fish"], help="5dk")
+@bot.command(name="balık", aliases=["fish"], help="Balık tut (5 dk bekleme)")
 @commands.cooldown(1, 300, commands.BucketType.user)
 async def balık(ctx):
-    n, v = random.choice([("Levrek",40),("Nemo",90),("Köpekbalığı",200),("Ahtapot",120),("Çizme",5)])
-    db.q("UPDATE users SET coins=coins+? WHERE user_id=?", (v, ctx.author.id)); await rp(ctx, head("fish", "BALIK") + "\n\n**" + n + "** → +" + str(v) + " coin")
+    n, v = random.choice([("Levrek",40),("Clownfish (Nemo)",90),("Köpekbalığı",200),("Ahtapot",120),("Eski Bir Çizme",5)])
+    db.q("UPDATE users SET coins=coins+? WHERE user_id=?", (v, ctx.author.id)); await rp(ctx, head("fish", "BALIKÇILIK") + "\n\nOlta attın ve su yüzüne çıkan şey: **" + n + "**!\nSatıp **+" + str(v) + " coin** elde ettin.")
 @kategori("eco")
-@bot.command(name="maden", aliases=["mine"], help="5dk")
+@bot.command(name="maden", aliases=["mine"], help="Madende kazı yap (5 dk bekleme)")
 @commands.cooldown(1, 300, commands.BucketType.user)
 async def maden(ctx):
-    n, v = random.choice([("Kömür",30),("Gümüş",110),("Altın",200),("Elmas",400),("Taş",5)])
-    db.q("UPDATE users SET coins=coins+? WHERE user_id=?", (v, ctx.author.id)); await rp(ctx, head("pick", "MADEN") + "\n\n**" + n + "** → +" + str(v) + " coin")
+    n, v = random.choice([("Kömür Bloğu",30),("Gümüş Külçesi",110),("Altın Tozu",200),("Ham Elmas Kristali",400),("Sıradan Taş Parçası",5)])
+    db.q("UPDATE users SET coins=coins+? WHERE user_id=?", (v, ctx.author.id)); await rp(ctx, head("pick", "MADENCİLİK") + "\n\nKazmayı vurduğun yerden çıktı: **" + n + "**!\nDeğeri yaklaşık **+" + str(v) + " coin** ediyor.")
 @kategori("eco")
-@bot.command(name="soy", aliases=["rob"], help="<@üye>")
+@bot.command(name="soy", aliases=["rob"], help="<@üye> — Riskli soygun girişimi (%45 şans)")
 @commands.cooldown(1, 600, commands.BucketType.user)
 async def soy(ctx, u: discord.Member):
-    if u.id == ctx.author.id or u.bot: return await rp(ctx, ER("GEÇERSİZ"))
+    if u.id == ctx.author.id or u.bot: return await rp(ctx, ER("HEDEF GEÇERSİZ", "Kendini veya botları soyamazsın."))
     ensure_user(u.id, str(u)); t = db.one("SELECT coins FROM users WHERE user_id=?", (u.id,)); me = db.one("SELECT coins FROM users WHERE user_id=?", (ctx.author.id,))
-    if t["coins"] < 200: return await rp(ctx, ER("HEDEF FAKİR"))
+    if t["coins"] < 200: return await rp(ctx, ER("AV YOK", "**" + str(u) + "** fakir olduğu için çalacak bir şey bulamadın."))
     if random.random() < 0.45:
         s = random.randint(50, min(500, t["coins"]))
         db.q("UPDATE users SET coins=coins-? WHERE user_id=?", (s, u.id)); db.q("UPDATE users SET coins=coins+? WHERE user_id=?", (s, ctx.author.id))
-        await rp(ctx, head("fire", "SOYGUN BAŞARILI") + "\n\n**+" + str(s) + " coin**")
+        await rp(ctx, head("fire", "SOYGUN BAŞARILI!") + "\n\nMaskeni taktın ve **" + str(u) + "**'nin cebinden sessizce **+" + str(s) + " coin** aldın! Kimse fark etmedi.")
     else:
         f = min(me["coins"], random.randint(50, 200)); db.q("UPDATE users SET coins=coins-? WHERE user_id=?", (f, ctx.author.id))
-        await rp(ctx, head("cross", "YAKALANDIN") + "\n\n**-" + str(f) + " coin** ceza")
+        await rp(ctx, head("cross", "YAKALANDIN!") + "\n\nGirişimin **" + str(u) + "** tarafından fark edildi.\nCeza olarak **- " + str(f) + " coin** kaybettin ve rezil oldun.")
 @kategori("eco")
-@bot.command(name="transfer", help="<@üye> <miktar>")
+@bot.command(name="transfer", help="<@üye> <miktar> — Coin gönder")
 async def transfer(ctx, u: discord.Member, m: int):
-    if m <= 0 or u.id == ctx.author.id: return await rp(ctx, ER("GEÇERSİZ"))
+    if m <= 0 or u.id == ctx.author.id: return await rp(ctx, ER("GEÇERSİZ İŞLEM", "Miktar pozitif olmalı ve kendine transfer yapamazsın."))
     ensure_user(u.id, str(u)); me = db.one("SELECT coins FROM users WHERE user_id=?", (ctx.author.id,))
-    if me["coins"] < m: return await rp(ctx, ER("YETERSİZ"))
+    if me["coins"] < m: return await rp(ctx, ER("BAKİYE YETERSİZ", "Cüzdanında senden başka biri için yeterli coin yok.\nMevcut bakiyen: **" + str(me["coins"]) + "**"))
     db.q("UPDATE users SET coins=coins-? WHERE user_id=?", (m, ctx.author.id)); db.q("UPDATE users SET coins=coins+? WHERE user_id=?", (m, u.id))
-    await rp(ctx, head("coin", "TRANSFER") + "\n\n" + ctx.author.mention + " → " + u.mention + " **" + str(m) + " coin**")
+    await rp(ctx, head("coin", "TRANSFER ONAYLANDI") + "\n\n" + ctx.author.mention + " hesabından **" + str(m) + " coin**, " + u.mention + " hesabına havale edildi.")
 @kategori("eco")
-@bot.command(name="bahis", aliases=["bet"], help="<miktar>")
+@bot.command(name="bahis", aliases=["bet"], help="<miktar> — Yazı-tura bahsi (%50 ihtimal)")
 @commands.cooldown(1, 10, commands.BucketType.user)
 async def bahis(ctx, m: int):
-    if m <= 0: return await rp(ctx, ER("GEÇERSİZ"))
+    if m <= 0: return await rp(ctx, ER("GEÇERSİZ BAHİS", "Bahis miktarı 1'den büyük olmalıdır."))
     me = db.one("SELECT coins FROM users WHERE user_id=?", (ctx.author.id,))
-    if me["coins"] < m: return await rp(ctx, ER("YETERSİZ"))
+    if me["coins"] < m: return await rp(ctx, ER("PARAN YETMİYOR", "Masada yatıracak kadar paran yok. Mevcut: **" + str(me["coins"]) + "**"))
     w = random.random() < 0.5; db.q("UPDATE users SET coins=coins+? WHERE user_id=?", (m if w else -m, ctx.author.id))
-    await rp(ctx, (head("star", "KAZANDIN") + "\n\n**+" + str(m*2) + " coin**") if w else (head("cross", "KAYBETTİN") + "\n\n**-" + str(m) + " coin**"))
+    await rp(ctx, (head("star", "JACKPOT!") + "\n\nTahminin doğru çıktı!\n**+" + str(m*2) + " coin** kazanç.") if w else (head("cross", "MAALESEF KAYBETTİN") + "\n\nPara masada kaldı.\n**- " + str(m) + " coin** eksildin."))
 @kategori("eco")
-@bot.command(name="market", aliases=["shop"], help="Market")
+@bot.command(name="market", aliases=["shop"], help="Özel ürün mağazasını açar")
 async def market(ctx):
-    v = Panel(head("gift", "KATRE MARKET") + "\n\n" + KV([(e("pro")+"Pro 30 gün", "50.000"), (e("palette")+"Rank rengi", "5.000"), (e("tag")+"Tag", "7.500")])); v.btn_url("Satın Al", SUPPORT_URL, emoji="🛒")
-    await rp(ctx, v.text, v)
+    v = Panel(head("gift", "PREMIUM MAĞAZA") + "\n\n" + KV([(e("pro")+"PRO Üyelik (30 Gün)", "50.000 coin"), (e("palette")+"Nick Renklendirme", "5.000 coin"), (e("tag")+"Özel Etiket/Tag", "7.500 coin")])); v.btn_url("Satın Alma İşlemi İçin Destek", SUPPORT_URL, emoji="🛒")
+    await rp(ctx, v.text + "\n\n" + _q("Ürün satın almak için destek butonuna tıklayıp adminlerle iletişime geçmelisin."), v)
 
 @kategori("fun")
-@bot.command(name="8ball", help="<soru>")
-async def eightball(ctx, *, s): await rp(ctx, head("search", "8BALL") + "\n\n**S:** " + s[:80] + "\n**C:** " + random.choice(["Evet!", "Büyük ihtimal", "Belki", "Hayır", "Asla!", "Kesinlikle"]))
+@bot.command(name="8ball", help="<soru> — Sihirli küreden fal bak")
+async def eightball(ctx, *, s): await rp(ctx, head("search", "SİHİRLİ KÜRE") + "\n\nSorun: **" + s[:80] + "**\nCevabı: **" + random.choice(["Kesinlikle Evet!", "Büyük İhtimal Evet", "Belirsiz... Tekrar Sor", "Muhtemelen Hayır", "Asla Hayır!"]))
 @kategori("fun")
-@bot.command(name="yazıtura", help="At")
-async def yazıtura(ctx): await rp(ctx, head("dice", "YAZI TURA") + "\n\nSonuç: **" + random.choice(["YAZI", "TURA"]) + "**")
+@bot.command(name="yazıtura", help="Havaya madeni para at")
+async def yazıtura(ctx): await rp(ctx, head("dice", "PARA ATIŞI") + "\n\nHava kararırken geldi...\nSonuç: **" + random.choice(["YAZI", "TURA"]) + "**!")
 @kategori("fun")
-@bot.command(name="zar", help="1-6")
+@bot.command(name="zar", help="Altı yüzlü zar at (1-6)")
 async def zar(ctx):
-    r = random.randint(1, 6); await rp(ctx, head("dice", "ZAR") + "\n\n**" + str(r) + "** " + ["⚀","","⚂","","⚄",""][r-1])
+    r = random.randint(1, 6); await rp(ctx, head("dice", "ZAR ATILIYOR") + "\n\nGeldi: **" + str(r) + "** " + ["⚀","","","","⚄",""][r-1])
 @kategori("fun")
-@bot.command(name="aşk", aliases=["ask","love"], help="<@üye>")
+@bot.command(name="aşk", aliases=["ask","love"], help="<@üye> — Aranızdaki uyumu ölçer")
 async def aşk(ctx, u: discord.Member):
-    p = random.randint(0, 100); m = "Yok bu iş..." if p < 30 else ("Fena değil!" if p < 60 else ("Güzel çift!" if p < 85 else "RUH İKİZİ!"))
-    await rp(ctx, head("heart", "AŞK ÖLÇER") + "\n\n" + ctx.author.mention + " x " + u.mention + "\n" + bar(p) + "\n**" + m + "**")
+    p = random.randint(0, 100); m = "Yok bu iş..." if p < 30 else ("Fena değil ama zorlasan da olmaz" if p < 60 else ("Gayet güzel bir ikilisiniz!" if p < 85 else "RUH İKİZİSİNİZ!!! ❤️‍🔥"))
+    await rp(ctx, head("heart", "AŞK TESTİ SONUCU") + "\n\n" + ctx.author.mention + " x " + u.mention + "\n\nUyum Oranı: " + bar(p) + "\nYorum: **" + m + "**")
 @kategori("fun")
-@bot.command(name="slot", help="Çevir")
+@bot.command(name="slot", help="Slot makinesini çevir")
 async def slot(ctx):
-    s = ["🍒","","🍇","💎","7️⃣",""]; r = [random.choice(s) for _ in range(3)]; w = len(set(r)) == 1
-    await rp(ctx, head("slot", "SLOT") + "\n\n┃ " + " ┃ ".join(r) + " ┃\n" + ("**JACKPOT!** 🎉" if w else "Olmadı..."))
+    s = ["🍒","","","💎","7️⃣",""]; r = [random.choice(s) for _ in range(3)]; w = len(set(r)) == 1
+    await rp(ctx, head("slot", "SLOT MAKİNESİ") + "\n\n┃ " + " ┃ ".join(r) + " ┃\n" + ("**ÜÇÜ AYNI! JACKPOT VURDUN! 🎰**" if w else "Maalesef üçlü tutmadı... Şansı tekrar dene."))
 @kategori("fun")
-@bot.command(name="seç", aliases=["sec"], help="<a> <b>")
+@bot.command(name="seç", aliases=["sec"], help="<a> <b> ... — Karar vermeni sağlar")
 async def seç(ctx, *, s):
     o = s.split()
-    if len(o) < 2: return await rp(ctx, ER("GEÇERSİZ", "2+ seçenek"))
-    await rp(ctx, head("target", "SEÇİM") + "\n\nCevabım: **" + random.choice(o) + "**")
+    if len(o) < 2: return await rp(ctx, ER("YETERLİ SEÇENEK YOK", "Lütfen en az iki seçenek yaz. Örnek: `k!seç Pizza Burger`"))
+    await rp(ctx, head("target", "BOT KARARINI VERDİ") + "\n\nSeçeneklerin: " + ", ".join("`"+x+"`" for x in o) + "\nBenim tercihim: **" + random.choice(o) + "**")
 @kategori("fun")
-@bot.command(name="şanslı", aliases=["sansli"], help="<1-100>")
+@bot.command(name="şanslı", aliases=["sansli"], help="<1-100> — Tahmin oyunu (+coin ödüllü)")
 @commands.cooldown(1, 30, commands.BucketType.user)
 async def şanslı(ctx, t2: int):
-    if not 1 <= t2 <= 100: return await rp(ctx, ER("GEÇERSİZ", "1-100"))
+    if not 1 <= t2 <= 100: return await rp(ctx, ER("SINIR DIŞI TAHMİN", "Lütfen 1 ile 100 arasında bir sayı tahmin et."))
     t = random.randint(1, 100)
-    if t2 == t: w, msg = 500, "JACKPOT!"
-    elif abs(t2 - t) <= 5: w, msg = 50, "Yaklaştın!"
-    else: w, msg = 0, "Olmadı..."
+    if t2 == t: w, msg = 500, "TAM İSABET! Muhteşemsin!"
+    elif abs(t2 - t) <= 5: w, msg = 50, "Çok Yaklaştın! Neredeyse tam tutturuyordun."
+    else: w, msg = 0, "Uzak kaldın... Belki bir dahaki sefer."
     if w: db.q("UPDATE users SET coins=coins+? WHERE user_id=?", (w, ctx.author.id))
-    await rp(ctx, head("dice", "ŞANSLI NUMARA") + "\n\nTutulan: **" + str(t) + "** • Senin: **" + str(t2) + "**\n" + msg + ((" → **+" + str(w) + " coin**") if w else ""))
+    await rp(ctx, head("dice", "SAYI TAHMİNİ") + "\n\nBot'un Tuttuğu Sayı: **" + str(t) + "**\nSenin Tahminin: **" + str(t2) + "**\n\nSonuç: " + msg + ((" → Ödül: **+" + str(w) + " coin**") if w else ""))
 @kategori("fun")
-@bot.command(name="oylama", aliases=["anket"], help="<soru> [| A | B]")
+@bot.command(name="oylama", aliases=["anket"], help="<soru> [| Seçenek A | Seçenek B] — Butonlu anket oluştur")
 @commands.cooldown(1, 5, commands.BucketType.user)
 async def oylama(ctx, *, s):
     try:
         parts = [x.strip() for x in s.split("|")]; q = parts[0][:200] or "Anket"
         opts = [x[:60] for x in parts[1:6] if x] if len(parts) > 1 else ["Evet", "Hayır", "Çekimser"]
-        if len(opts) < 2: return await rp(ctx, ER("ÖRNEK", "Soru | A | B"))
+        if len(opts) < 2: return await rp(ctx, ER("ÇOK AZ SEÇENEK", "En az iki seçenek vermelisin. Format: `k!oylama En iyi renk? | Kırmızı | Mavi`"))
         cur = db.q("INSERT INTO polls(guild_id,channel_id,message_id,question,options,votes,status,creator,ts) VALUES(?,?,0,?,?,'{}','active',?,?)", (ctx.guild.id, ctx.channel.id, q, json.dumps(opts, ensure_ascii=False), ctx.author.id, datetime.datetime.now().isoformat()))
         pid = cur.lastrowid; p = db.one("SELECT * FROM polls WHERE id=?", (pid,))
         v = PollPanel(pid, opts, poll_content(p)); msg = await rp(ctx, poll_content(p), v)
         db.q("UPDATE polls SET message_id=? WHERE id=?", (msg.id, pid)); bot.add_view(v)
     except Exception as ex:
-        traceback.print_exc(); await rp(ctx, ER("ANKET HATASI", str(ex)[:250]))
+        traceback.print_exc(); await rp(ctx, ER("ANKET OLUŞTURULAMADI", str(ex)[:250]))
 @kategori("fun")
-@bot.command(name="ppboyu", aliases=["pp"], help="Ölçüm")
+@bot.command(name="ppboyu", aliases=["pp"], help="[<@üye>] — Komik PP Ölçer")
 @commands.cooldown(1, 5, commands.BucketType.user)
 async def ppboyu(ctx, u: discord.Member = None):
     u = u or ctx.author; n = (u.id % 18) + 3
-    await rp(ctx, head("game", "PP ÖLÇÜM") + "\n\n" + u.mention + "\n`8" + "=" * n + "D`  (**" + str(n+2) + " cm**)")
+    await rp(ctx, head("game", "PP ÖLÇÜM RAPORU") + "\n\nKonu: **" + u.display_name + "**\nÖlçülen boy: `8" + "=" * n + "D` (**" + str(n+2) + " cm**)\n\n*(Bu tamamen rastgele eğlencelik bir araçtır, ciddiye alma!)*")
 @kategori("fun")
-@bot.command(name="quiz", aliases=["bilgi"], help="+75 coin")
+@bot.command(name="quiz", aliases=["bilgi"], help="Genel kültür sorusu (+75 coin ödüllü)")
 @commands.cooldown(1, 10, commands.BucketType.user)
 async def quiz(ctx):
-    Q = [("Türkiye'nin başkenti?",["İstanbul","Ankara","İzmir","Bursa"],1),("En büyük gezegen?",["Dünya","Mars","Jüpiter","Satürn"],2),("Discord.py dili?",["Java","Python","C++","Go"],1),("Suyun formülü?",["H2O","CO2","O2","NaCl"],0)]
+    Q = [("Türkiye'nin başkenti neresidir?",["İstanbul","Ankara","İzmir","Bursa"],1),("Güneş sistemimizdeki en büyük gezegen hangisidir?",["Dünya","Mars","Jüpiter","Satürn"],2),("Discord.py hangi programlama dili üzerine kuruludur?",["Java","Python","C++","Go"],1),("Su molekülünün kimyasal formülü nedir?",["H2O","CO2","O2","NaCl"],0)]
     q, o, a = random.choice(Q)
-    txt = head("game", "BİLGİ YARIŞMASI") + "\n\n### " + q + "\n" + e("time") + " 30 sn • " + e("gift") + " +75 coin"
+    txt = head("game", "BİLGİ YARIŞMASI") + "\n\nSoru: ### " + q + "\n\n" + e("time") + " Süren: 30 saniye • " + e("gift") + " Ödül: +75 Coin"
     view = Panel(txt, timeout=30); emj = ["1️⃣","2️⃣","3️⃣","4️⃣"]
     def cb(i):
         async def _c(it):
             if i == a:
                 ensure_user(it.user.id, str(it.user)); db.q("UPDATE users SET coins=coins+75, xp=xp+20 WHERE user_id=?", (it.user.id,))
-                await sendv_eph(it, OK("DOĞRU!", "+75 coin • +20 XP"))
-            else: await sendv_eph(it, ER("YANLIŞ", "Doğrusu: **" + o[a] + "**"))
+                await sendv_eph(it, OK("DOĞRU CEVAP!", "Harikasın! Hesabına **+75 coin** ve **+20 XP** eklendi."))
+            else: await sendv_eph(it, ER("YANLIŞ CEVAP", "Doğrusu şıklardan **" + o[a] + "** idi. Bir dahaki sefere daha dikkatli ol!"))
             for b in view.children:
                 if isinstance(b, Button): b.disabled = True
             try: await it.message.edit(content=txt, view=view)
@@ -1784,65 +1791,66 @@ async def quiz(ctx):
     for i, op in enumerate(o): view.btn(op[:78], cb(i), emoji=emj[i], row=0)
     await rp(ctx, txt, view)
 @kategori("fun")
-@bot.command(name="tahmin", help="<1-10>")
+@bot.command(name="tahmin", help="<1-10> — Basit sayı tutma oyunu (+100 coin)")
 @commands.cooldown(1, 15, commands.BucketType.user)
 async def tahmin(ctx, s: int):
-    if not 1 <= s <= 10: return await rp(ctx, ER("GEÇERSİZ", "1-10"))
+    if not 1 <= s <= 10: return await rp(ctx, ER("GEÇERSİZ ARALIK", "Lütfen 1 ile 10 arasında bir sayı gir."))
     t = random.randint(1, 10)
     if s == t:
-        db.q("UPDATE users SET coins=coins+100 WHERE user_id=?", (ctx.author.id)); await rp(ctx, head("star", "BİLDİN!") + "\n\n**+100 coin**")
-    else: await rp(ctx, head("cross", "BİLEMEDİN") + "\n\nTutulan: **" + str(t) + "**")
+        db.q("UPDATE users SET coins=coins+100 WHERE user_id=?", (ctx.author.id)); await rp(ctx, head("star", "TEBRİKLER!") + "\n\nTuttuğum sayı tam olarak **" + str(t) + "** idi!\nÖdülün: **+100 coin**.")
+    else: await rp(ctx, head("cross", "BİLEMEDİN :(") + "\n\nSenin tahminin: " + str(s) + "\nTuttuğum sayı: **" + str(t) + "**\nTekrar deneyebilirsin.")
 @kategori("fun")
-@bot.command(name="evlen", help="<@üye>")
+@bot.command(name="evlen", help="<@üye> — Sanal evlilik töreni")
 async def evlen(ctx, u: discord.Member):
-    if u.id == ctx.author.id or u.bot: return await rp(ctx, ER("GEÇERSİZ"))
-    if db.one("SELECT 1 FROM marriages WHERE user1=? OR user2=? OR user1=? OR user2=?", (ctx.author.id,ctx.author.id,u.id,u.id)): return await rp(ctx, ER("ZATEN EVLİ"))
+    if u.id == ctx.author.id or u.bot: return await rp(ctx, ER("GEÇERSİZ EŞ", "Kendinle veya botlarla evlenemezsin."))
+    if db.one("SELECT 1 FROM marriages WHERE user1=? OR user2=? OR user1=? OR user2=?", (ctx.author.id,ctx.author.id,u.id,u.id)): return await rp(ctx, ER("ZATEN EVLİSİN", "Halihazırda resmi bir birlikteliğin var. Boşanmak için `k!boşan` kullan."))
     db.q("INSERT INTO marriages(user1,user2,since) VALUES(?,?,?)", (ctx.author.id, u.id, datetime.datetime.now().isoformat()))
-    await rp(ctx, head("ring", "EVLENDİNİZ!") + "\n\n" + ctx.author.mention + " x " + u.mention + "\nMutluluklar 💍")
+    await rp(ctx, head("ring", "RESMİ OLARAK EVLENDİNİZ!") + "\n\n" + ctx.author.mention + " ♾️ " + u.mention + "\nMutluluklar dileriz! 💍")
 @kategori("fun")
-@bot.command(name="boşan", help="Boşan")
+@bot.command(name="boşan", help="Sanal evliliğini bitirir")
 async def boşan(ctx):
-    db.q("DELETE FROM marriages WHERE user1=? OR user2=?", (ctx.author.id, ctx.author.id)); await rp(ctx, head("broken", "BOŞANDIN"))
+    db.q("DELETE FROM marriages WHERE user1=? OR user2=?", (ctx.author.id, ctx.author.id)); await rp(ctx, head("broken", "BOŞANMA GERÇEKLEŞTİ") + "\n\nArtık özgürsün... *(Umarım pişman değilsindir.)*")
 @kategori("fun")
-@bot.command(name="eş", help="[<@üye>]")
+@bot.command(name="eş", help="[<@üye>] — Partner bilgisini getirir")
 async def eş(ctx, u: discord.Member = None):
     u = u or ctx.author; m = db.one("SELECT * FROM marriages WHERE user1=? OR user2=?", (u.id, u.id))
-    if not m: return await rp(ctx, WN("BEKAR", u.mention))
-    await rp(ctx, head("ring", "EŞ") + "\n\n" + u.mention + " x <@" + str(m["user2"] if m["user1"] == u.id else m["user1"]) + ">")
+    if not m: return await rp(ctx, WN("BEKARSIN", "**" + str(u) + "** şu an hayat arkadaşsız. Bulmak için `k!evlen` kullanabilirsin."))
+    partner = m["user2"] if m["user1"] == u.id else m["user1"]
+    await rp(ctx, head("ring", "PARTNER BİLGİSİ") + "\n\n**" + str(u) + "**'nın eşi: <@" + str(partner) + ">\nEvlilik Tarihi: " + m["since"][:10])
 
 @kategori("give")
-@bot.command(name="çekiliş", aliases=["cekilis"], help="<süre> <kazanan> <ödül>")
+@bot.command(name="çekiliş", aliases=["cekilis"], help="<süre> <kazanan_sayısı> <ödül_adı> — Butonlu çekiliş başlatır")
 @commands.has_permissions(administrator=True)
 async def çekiliş(ctx, s: str, k: int, *, ö):
     try: dk = parse_sure(s)
-    except Exception: return await rp(ctx, ER("SÜRE", "60m / 2h / 1d"))
-    if dk < 1 or k < 1: return await rp(ctx, ER("GEÇERSİZ"))
+    except Exception: return await rp(ctx, ER("SÜRE ANLAŞILAMADI", "Format örnekleri: `60m` (dakika), `2h` (saat), `1d` (gün)."))
+    if dk < 1 or k < 1: return await rp(ctx, ER("PARAMETRE HATASI", "Süre 1 dakikadan, kazanan sayısı 1'den az olamaz."))
     end = datetime.datetime.now() + datetime.timedelta(minutes=dk)
     gw = {"prize": ö, "winners": k, "end_time": end.timestamp(), "host": ctx.author.id, "participants": "[]"}
     t = gw_start(gw); msg = await rp(ctx, t, GiveawayPanel(bot, t))
     db.q("INSERT INTO giveaways(message_id,guild_id,channel_id,prize,winners,end_time,host) VALUES(?,?,?,?,?,?,?)", (msg.id, ctx.guild.id, ctx.channel.id, ö, k, end.timestamp(), ctx.author.id))
 @kategori("give")
-@bot.command(name="çekilişler", help="Aktifler")
+@bot.command(name="çekilişler", help="Devam eden tüm çekilişleri listeler")
 async def çekilişler(ctx):
     rs = db.all("SELECT * FROM giveaways WHERE guild_id=? AND status='active'", (ctx.guild.id,))
-    if not rs: return await rp(ctx, ER("AKTİF ÇEKİLİŞ YOK"))
-    await rp(ctx, head("give", "AKTİF ÇEKİLİŞLER") + "\n\n" + "\n".join(e("arrow") + " **" + g["prize"] + "** • <t:" + str(int(g["end_time"])) + ":R>" for g in rs))
+    if not rs: return await rp(ctx, INFO("BOŞ LİSTE", "Şu anda devam eden aktif çekiliş bulunmuyor."))
+    await rp(ctx, head("give", "DEVAM EDEN ÇEKİLİŞLER") + "\n\n" + "\n".join(e("arrow") + " **" + g["prize"] + "** • Bitiş: <t:" + str(int(g["end_time"])) + ":R>" for g in rs))
 @kategori("give")
-@bot.command(name="çekilişbitir", help="<id>")
+@bot.command(name="çekilişbitir", help="<mesaj_id> — Çekilişi erken sonlandırır")
 @commands.has_permissions(administrator=True)
 async def çekilişbitir(ctx, m: int):
     g = db.one("SELECT * FROM giveaways WHERE message_id=? AND guild_id=?", (m, ctx.guild.id))
-    if not g or g["status"] != "active": return await rp(ctx, ER("BULUNAMADI"))
-    await finalize_giveaway(bot, m); await rp(ctx, OK("BİTİRİLDİ"))
+    if not g or g["status"] != "active": return await rp(ctx, ER("BULUNAMADI", "Bu ID'ye ait aktif bir çekiliş yok."))
+    await finalize_giveaway(bot, m); await rp(ctx, OK("SONLANDIRILDI", "Çekiliş erken bitirilip kazanan(lar) belirlendi."))
 
 @kategori("pro")
-@bot.command(name="pro", help="Durum + ayrıcalıklar")
+@bot.command(name="pro", help="[<@üye>] — Pro üyelik durumu ve ayrıcalıkları")
 async def pro(ctx, u: discord.Member = None):
     u = u or ctx.author; ensure_user(u.id, str(u)); d = db.one("SELECT * FROM users WHERE user_id=?", (u.id,))
-    await rp(ctx, head("pro", "KATRE PRO") + "\n\n" + KV([(e("dot")+"Durum", "PRO ÜYE" if d["pro"] else "Yok"), (e("log")+"Log", len(db.all("SELECT 1 FROM pro_logs WHERE user_id=?", (u.id,))))]) +
-        "\n\n" + e("star") + " **PRO KOMUTLARI**\n" + e("arrow") + " `prooda` özel ses odası\n" + e("arrow") + " `prorol` renkli PRO rolü\n" + e("arrow") + " `probonus` 12s'de +500 coin\n" + e("arrow") + " `probanner` havalı banner\n" + e("arrow") + " `proşans` saatlik 1000 coin\n" + e("arrow") + " `prorenk` `protag` `proxp` `prostats` `proyazı` `proembed`")
+    await rp(ctx, head("pro", "PRO ABONELİK DURUMU") + "\n\n" + KV([(e("dot")+"Statü", "✨ PRO ÜYESİ ✨" if d["pro"] else "Standart Üye"), (e("log")+"Geçmiş İşlem Sayısı", len(db.all("SELECT 1 FROM pro_logs WHERE user_id=?", (u.id,))))]) +
+        "\n\n" + e("star") + " **PRO AYRICALIKLARI VE KOMUTLARI**\n" + e("arrow") + " `k!prooda` → Özel ses odası yarat\n" + e("arrow") + " `k!prorol` → Renkli 'KATRE PRO' rozeti al\n" + e("arrow") + " `k!probonus` → 12 saatte bir +500 coin\n" + e("arrow") + " `k!probanner` → ASCII sanat banner üret\n" + e("arrow") + " `k!proşans` → Saatlik yüksek jackpot şansı\n" + e("arrow") + " Diğerleri: `prorenk`, `protag`, `proxp` (2x boost), `prostats` vb.")
 @kategori("pro")
-@bot.command(name="prooda", help="Özel oda")
+@bot.command(name="prooda", help="Sana özel, şifresiz bir ses odası açar")
 @is_pro()
 async def prooda(ctx):
     c = discord.utils.get(ctx.guild.categories, name="PRO ODALAR") or await ctx.guild.create_category("PRO ODALAR")
@@ -1850,9 +1858,9 @@ async def prooda(ctx):
     except Exception: pass
     ch = await ctx.guild.create_voice_channel(ctx.author.display_name, category=c)
     await ch.set_permissions(ctx.author, connect=True, manage_channels=True, move_members=True)
-    await rp(ctx, OK("PRO ODA", ch.mention + " hazır!"))
+    await rp(ctx, OK("ODA HAZIRLANDI", "**" + ch.name + "** sesi senin kontrolünde. Davet etmek istediklerini buraya taşıyabilirsin!"))
 @kategori("pro")
-@bot.command(name="prorol", help="Sunucuda renkli PRO rolü al")
+@bot.command(name="prorol", help="Sunucuda renkli PRO rozetini kuşan")
 @is_pro()
 async def prorol(ctx):
     u = db.one("SELECT * FROM users WHERE user_id=?", (ctx.author.id,))
@@ -1860,251 +1868,256 @@ async def prorol(ctx):
     except Exception: color = discord.Color.gold()
     r = discord.utils.get(ctx.guild.roles, name="KATRE PRO")
     if not r:
-        try: r = await ctx.guild.create_role(name="KATRE PRO", color=color, hoist=True, reason="Pro rol")
-        except Exception: return await rp(ctx, ER("YETKİ", "Rol oluşturamıyorum."))
+        try: r = await ctx.guild.create_role(name="KATRE PRO", color=color, hoist=True, reason="Pro rozet sistemi")
+        except Exception: return await rp(ctx, ER("ROL YARATILAMADI", "Botun burada rol oluşturma yetkisi bulunmuyor."))
     else:
         try: await r.edit(color=color)
         except Exception: pass
-    if r in ctx.author.roles: return await rp(ctx, WN("ZATEN VAR", r.mention))
-    await ctx.author.add_roles(r, reason="Pro üye")
-    await rp(ctx, OK("PRO ROL", r.mention + " verildi!"))
+    if r in ctx.author.roles: return await rp(ctx, WN("ZATEN KUŞANMIŞSIN", "Rozetin halihazırda üzerinde parlıyor: " + r.mention))
+    await ctx.author.add_roles(r, reason="Pro Rozet Aktivasyonu")
+    await rp(ctx, OK("ROZET TAKILDI", "**" + r.name + "** rolün omuzlarında! Artık sohbetlerde farklı görünüyosun."))
 @kategori("pro")
-@bot.command(name="probonus", help="12 saatte bir +500 coin (PRO)")
+@bot.command(name="probonus", help="12 saatte bir bedava +500 coin çekişi")
 @is_pro()
 @commands.cooldown(1, 43200, commands.BucketType.user)
 async def probonus(ctx):
     db.q("UPDATE users SET coins=coins+500 WHERE user_id=?", (ctx.author.id,))
-    await rp(ctx, head("gift", "PRO BONUS") + "\n\n" + ctx.author.mention + " → **+500 coin** " + e("pro") + "\n" + e("time") + " Sonraki: <t:" + str(int(datetime.datetime.now().timestamp()) + 43200) + ":R>")
+    await rp(ctx, head("gift", "PRO BONUSU TOPLANDI") + "\n\n" + ctx.author.mention + " hesabına VIP hak ediş olarak **+500 coin** yüklendi.\n\n" + e("time") + " Sonraki müsaitlik: <t:" + str(int(datetime.datetime.now().timestamp()) + 43200) + ":R>")
 @kategori("pro")
-@bot.command(name="probanner", help="<metin> — Havalı PRO banner")
+@bot.command(name="probanner", help="<kısa_metin> — ASCII çerçeveli prestijli banner")
 @is_pro()
 async def probanner(ctx, *, m):
     t = m[:38].upper().center(38); n = ("@" + ctx.author.display_name)[:38].center(38)
-    await rp(ctx, "```╔══════════════════════════════════════════╗\n║" + t + "║\n║" + n + "║\n║            [ KATRE PRO ÜYESİ ]           ║\n╚══════════════════════════════════════════╝```")
+    await rp(ctx, "```╔══════════════════════════════════════════╗\n║" + t + "║\n║" + n + "║\n║            [ KATRE PRO ÜYESİ ]           ║\n╚══════════════════════════════════════════╝```\n\nBanner kodunu kopyalayıp profil metnine yapıştırabilirsin.")
 @kategori("pro")
-@bot.command(name="proşans", aliases=["prosans"], help="Saatlik şans: 1000 coin (PRO)")
+@bot.command(name="proşans", aliases=["prosans"], help="Saatte 1 kez oynanabilen Yüksek Jackpot Şansı (1-50 arası)")
 @is_pro()
 @commands.cooldown(1, 3600, commands.BucketType.user)
 async def proşans(ctx):
     n = random.randint(1, 50); win = n <= 10
     if win:
         db.q("UPDATE users SET coins=coins+1000 WHERE user_id=?", (ctx.author.id,))
-        await rp(ctx, head("star", "PRO ŞANS") + "\n\nÇekilen: **" + str(n) + "** (1-10 kazanır)\n" + e("party") + " **KAZANDIN → +1000 coin**")
+        await rp(ctx, head("star", "VIKING TALİHİ SENİNLE!") + "\n\nÇark **" + str(n) + "** rakamında durdu (Kazanma bandı: 1-10).\n**BÜYÜK JACKPOT: +1000 COIN!**")
     else:
-        await rp(ctx, head("dice", "PRO ŞANS") + "\n\nÇekilen: **" + str(n) + "** (1-10 kazanır)\n" + e("cross") + " Olmadı... 1 saat sonra tekrar dene.")
+        await rp(ctx, head("dice", "BU SEFER TUTMADI") + "\n\nÇark **" + str(n) + "** numarasında kaldı (1-10 olması gerekiyordu).\n1 saat sonra yeniden şansını dene.")
 @kategori("pro")
-@bot.command(name="prorenk", help="<hex>")
+@bot.command(name="prorenk", help="<hex_kod> — Rozet rengini kişiselleştir")
 @is_pro()
 async def prorenk(ctx, h: str):
     h = h.lstrip("#")
-    if len(h) != 6: return await rp(ctx, ER("ÖRNEK", "ff0000"))
+    if len(h) != 6: return await rp(ctx, ER("GEÇERSİZ HEX", "Format 6 haneli olmalıdır. Örnek: `ff0000` (kırmızı)"))
     try: int(h, 16)
-    except ValueError: return await rp(ctx, ER("GEÇERSİZ HEX"))
-    db.q("UPDATE users SET pro_color=? WHERE user_id=?", (h, ctx.author.id)); await rp(ctx, OK("RENK", "#" + h.upper() + "\n`k!prorol` ile rolüne uygula."))
+    except ValueError: return await rp(ctx, ER("HEX ÇÖZÜMLENEMEDİ", "Sadece 0-9 ve A-F harfleri kullanılabilir."))
+    db.q("UPDATE users SET pro_color=? WHERE user_id=?", (h, ctx.author.id)); await rp(ctx, OK("RENK KAYDEDİLDİ", "Yeni tonun: `#" + h.upper() + "`\n\nRozetine yansıtması için hemen ardından `k!prorol` komutunu çalıştır.")
 @kategori("pro")
-@bot.command(name="prostats", help="Detay")
+@bot.command(name="prostats", help="Pro hesap performans grafiği")
 @is_pro()
 async def prostats(ctx):
     d = db.one("SELECT * FROM users WHERE user_id=?", (ctx.author.id,))
-    await rp(ctx, head("chart", "PRO İSTATİSTİK") + "\n\n" + KV([(e("dot")+"Mesaj", d["messages"]), (e("chartup")+"Seviye", d["level"]), (e("coin")+"Coin", d["coins"]), (e("bolt")+"2x", "✅" if d["xp2"] else "❌")]))
+    await rp(ctx, head("chart", "PERFORMANS METRİKLERİ") + "\n\n" + KV([(e("dot")+"Toplam Mesaj", d["messages"]), (e("chartup")+"Seviye Atlama", d["level"]), (e("coin")+"Servet", d["coins"]), (e("bolt")+"XP Boost (2x)", "✅ Aktif" if d["xp2"] else "❌ Kapalı")]))
 @kategori("pro")
-@bot.command(name="proyazı", help="<metin>")
+@bot.command(name="proyazı", help="<metin> — Genişletilmiş Fullwidth font efekti")
 @is_pro()
-async def proyazı(ctx, *, m): await rp(ctx, head("pen", "PRO YAZI") + "\n\n" + fancy(m[:200]))
+async def proyazı(ctx, *, m): await rp(ctx, head("pen", "FONT EFEKTİ") + "\n\n" + fancy(m[:200]))
 @kategori("pro")
-@bot.command(name="proembed", help="<b> | <m> | <hex>")
+@bot.command(name="proembed", help="<başlık> | <gövde> — Minimalist embed taslağı")
 @is_pro()
 async def proembed(ctx, *, a):
     p = [x.strip() for x in a.split("|")]
-    if len(p) < 2: return await rp(ctx, ER("ÖRNEK", "Duyuru | Merhaba"))
-    await rp(ctx, "### " + p[0][:100] + "\n" + DIV + "\n" + p[1][:1500] + "\n" + e("pro") + " " + ctx.author.display_name)
+    if len(p) < 2: return await rp(ctx, ER("FORMAT BOZUK", "Örnek: `k!proembed Duyuru | Merhaba dünya!`"))
+    await rp(ctx, "### " + p[0][:100] + "\n" + DIV + "\n" + p[1][:1500] + "\n" + e("pro") + " Hazırlayan: " + ctx.author.display_name)
 @kategori("pro")
-@bot.command(name="protag", help="<metin>")
+@bot.command(name="protag", help="<etiket> — İsim önündeki özel tag")
 @is_pro()
 async def protag(ctx, *, t):
-    db.q("UPDATE users SET pro_tag=? WHERE user_id=?", (t[:12], ctx.author.id)); await rp(ctx, OK("TAG", t[:12]))
+    db.q("UPDATE users SET pro_tag=? WHERE user_id=?", (t[:12], ctx.author.id)); await rp(ctx, OK("TAG GÜNCELLENDİ", "Artık `[`" + t[:12] + "`] " + ctx.author.display_name + " şeklinde görüneceksin (Rank kartlarında)."))
 @kategori("pro")
-@bot.command(name="proxp", help="2x")
+@bot.command(name="proxp", help="Seviye tecrübesi kazancını 2 katına çıkar/aç-kapa")
 @is_pro()
 async def proxp(ctx):
     u = db.one("SELECT xp2 FROM users WHERE user_id=?", (ctx.author.id,)); n = 0 if u["xp2"] else 1
-    db.q("UPDATE users SET xp2=? WHERE user_id=?", (n, ctx.author.id)); await rp(ctx, OK("BOOST", "2x AÇIK" if n else "2x KAPALI"))
+    db.q("UPDATE users SET xp2=? WHERE user_id=?", (n, ctx.author.id)); await rp(ctx, OK("BOOSTER DEĞİŞTİ", "XP Kazancı şu an **" + ("2x (Çift Hızlı)" if n else "Normal (1x)") + "** durumunda."))
 
 @kategori("owner")
-@bot.command(name="halfowner", aliases=["coowner"], help="<ayarla/kaldır/bilgi/liste>")
+@bot.command(name="halfowner", aliases=["coowner"], help="<ayarla/kaldır/bilgi/liste> — Yardımcı yönetici erişimleri")
 async def halfowner(ctx, i: str = "bilgi", u: discord.Member = None):
     i = i.lower()
     if i in ("ayarla","ekle"):
-        if ctx.author.id != OWNER_ID: return
-        if not u: return await rp(ctx, ER("EKSİK", "@üye"))
+        if ctx.author.id != OWNER_ID: return await rp(ctx, ER("SADECE SAHİP", "Bu işlemi yalnızca ana bot sahibi yapabilir."))
+        if not u: return await rp(ctx, ER("ÜYE SEÇİLMEDİ", "Hangi üyeye yetki vermek istiyorsun? `k!halfowner ayarla @User`"))
         db.q("INSERT OR REPLACE INTO half_owners(user_id,since,added_by) VALUES(?,?,?)", (u.id, datetime.datetime.now().isoformat(), ctx.author.id))
-        await rp(ctx, OK("HALF OWNER", u.mention + " ☁️ yedeğe de işlendi."))
+        await rp(ctx, OK("HALF OWNER ATANDI", "**" + str(u) + "** artık Pro yönetimine müdahale edebilir ve bulut yedeğe işlendi."))
     elif i in ("kaldır","remove"):
-        if ctx.author.id != OWNER_ID: return
-        db.q("DELETE FROM half_owners WHERE user_id=?", ((u or ctx.author).id,)); await rp(ctx, WN("KALDIRILDI"))
+        if ctx.author.id != OWNER_ID: return await rp(ctx, ER("SADECE SAHİP", "Yetki revokesu sadece sahibedir."))
+        db.q("DELETE FROM half_owners WHERE user_id=?", ((u or ctx.author).id,)); await rp(ctx, WN("YETKİ ALINDI", "Half Owner statüsü düşürüldü."))
     elif i == "liste":
         rs = db.all("SELECT * FROM half_owners")
-        await rp(ctx, head("owner", "HALF OWNER LİSTESİ") + "\n\n" + ("\n".join(e("arrow") + " <@" + str(r["user_id"]) + "> • " + r["since"][:10] for r in rs) if rs else "Yok"))
+        await rp(ctx, head("owner", "HALF OWNER KADROSU") + "\n\n" + ("\n".join(e("arrow") + " <@" + str(r["user_id"]) + "> • Atanma: " + r["since"][:10] for r in rs) if rs else "Kimse atanmamış."))
     else:
         me = db.one("SELECT * FROM half_owners WHERE user_id=?", (ctx.author.id,))
-        await rp(ctx, head("owner", "HALF OWNER BİLGİ") + "\n\n" + e("star") + " **YETKİLERİ:** `prover` `proal` `prologlar`\n" + e("cross") + " **YAPAMAZ:** diğer owner komutları\n\n" + (e("check") + " Sen bir Half Owner'sın!" if me else e("info") + " Sen half owner değilsin."))
+        await rp(ctx, head("owner", "HALF OWNER NEDİR?") + "\n\n" + e("star") + " **Verilen Haklar:** `prover` (pro verme/alma), `proal`, `prologlar`.\n" + e("cross") + " **Yasaklı Olanlar:** Eval, Restart, Prefix, Blacklist vs.\n\n" + (e("check") + " Sen kadrodasın!" if me else e("info") + " Henüz aday bile değilsin."))
 @kategori("owner")
-@bot.command(name="sahip", aliases=["owner","panel"], help="Panel")
+@bot.command(name="sahip", aliases=["owner","panel"], help="Master Kontrol Panelini açar")
 @is_owner()
 async def sahip(ctx):
-    t = head("owner", "OWNER PANELİ") + "\n\n" + KV([(e("dot")+"Sunucu", len(bot.guilds)), (e("dot")+"Bakım", "AÇIK" if is_maintenance() else "KAPALI"), (e("dot")+"Yedek", "AÇIK" if BACKUP_CH else "KAPALI"), (e("spark")+"Sürüm", "v"+BOT_VERSION)])
+    t = head("owner", "MASTER KONSOL") + "\n\n" + KV([(e("dot")+"Entegre Sunucu", len(bot.guilds)), (e("dot")+"Bakım Rejimi", "AÇIK ⚠️" if is_maintenance() else "KAPALI ✅"), (e("dot")+"Bulut Yedekleme", "AKTİF ☁️" if BACKUP_CH else "PASİF ❌"), (e("spark")+"Versiyon", "v"+BOT_VERSION)])
     await rp(ctx, t, OwnerPanel(bot, t))
 @kategori("owner")
-@bot.command(name="bakım", aliases=["bakim"], help="<aç/kapat>")
+@bot.command(name="bakım", aliases=["bakim"], help="<aç/kapat> — Global bakım modunu toggle'lar")
 @is_owner()
 async def bakım(ctx, mod: str = None):
     if mod is None or mod.lower() in ("kapat","off","0"):
-        db.q("UPDATE owner_settings SET maintenance=0 WHERE id=1"); await rp(ctx, OK("BAKIM KAPALI"))
+        db.q("UPDATE owner_settings SET maintenance=0 WHERE id=1"); await rp(ctx, OK("BAKIM MODU KAPATILDI", "Bot tüm kullanıcılara tekrar hizmet vermeye başladı."))
     else:
-        db.q("UPDATE owner_settings SET maintenance=1 WHERE id=1"); await rp(ctx, OK("BAKIM AÇIK"))
+        db.q("UPDATE owner_settings SET maintenance=1 WHERE id=1"); await rp(ctx, OK("BAKIM MODU AÇILDI", "Diğer herkes komutlardan mahrum kaldı; sadece sen erişebiliyorsun."))
 @kategori("owner")
-@bot.command(name="restart", aliases=["rb"], help="Yeniden başlat")
+@bot.command(name="restart", aliases=["rb"], help="Process'i tamamen yeniden başlatır")
 @is_owner()
 async def restart(ctx):
-    await rp(ctx, OK("RESTART", "Bot yeniden başlatılıyor..."))
+    await rp(ctx, OK("SİSTEM YENİDEN BAŞLATILIYOR", "Lütfen 5-10 saniye bekleyin; bot otomatik dirilecektir."))
     await asyncio.sleep(2)
     try: os.execv(sys.executable, [sys.executable] + sys.argv)
     except Exception: sys.exit(0)
 @kategori("owner")
-@bot.command(name="yedek", help="<durum/kaydet/yükle> [emoji/pro/settings]")
+@bot.command(name="yedek", help="<durum/kaydet/yükle> [tür] — Cloud Backup Manager")
 @is_owner()
 async def yedek(ctx, i: str = "durum", hedef: str = None):
-    if not BACKUP_CH: return await rp(ctx, ER("KANAL YOK", "BACKUP_CHANNEL_ID ekle."))
+    if not BACKUP_CH: return await rp(ctx, ER("CHANNEL TANIMSIZ", "Ortam değişkeninde (ENV) BACKUP_CHANNEL_ID tanımlanmamış."))
     i = i.lower()
     if i == "kaydet":
         await push_backup(bot, "emoji", EMO_CACHE); await push_backup(bot, "pro", pro_snapshot()); await push_backup(bot, "settings", settings_snapshot())
         _HASH["emoji"] = json.dumps(EMO_CACHE, sort_keys=True); _HASH["pro"] = json.dumps(pro_snapshot(), sort_keys=True, default=str); _HASH["set"] = json.dumps(settings_snapshot(), sort_keys=True, default=str)
-        await rp(ctx, OK("YEDEKLENDİ", "Emoji + Pro + Ayarlar + HalfOwner bulutta."))
+        await rp(ctx, OK("SNAPSHOT ALINDI", "Emojiler, Pro Listesi, Ayarlar ve HalfOwner tablosu güvenli depoya aktarıldı."))
     elif i == "yükle":
         h = (hedef or "hepsi").lower(); msg = []
         if h in ("emoji","hepsi"):
             d = await pull_backup(bot, "emoji")
-            if d: msg.append("emoji:" + str(emoji_restore(d)))
+            if d: msg.append("Emoji Seti: " + str(emoji_restore(d)) + " slot restore.")
         if h in ("pro","hepsi"):
             d = await pull_backup(bot, "pro")
-            if d: msg.append("pro:" + str(pro_restore(d)))
+            if d: msg.append("Pro Verisi: " + str(pro_restore(d)) + " kayıt geri getirildi.")
         if h in ("settings","ayarlar","hepsi"):
             d = await pull_backup(bot, "settings")
-            if d: msg.append("ayar+half:" + str(settings_restore(d)))
+            if d: msg.append("Ayarlar/HalfOwner: " + str(settings_restore(d)) + " satır yüklendi.")
         _HASH["emoji"] = json.dumps(EMO_CACHE, sort_keys=True); _HASH["pro"] = json.dumps(pro_snapshot(), sort_keys=True, default=str); _HASH["set"] = json.dumps(settings_snapshot(), sort_keys=True, default=str)
-        await rp(ctx, OK("YÜKLENDİ", ", ".join(msg) or "yedek yok"))
+        await rp(ctx, OK("RESTORE TAMAMLANDI", "\n".join(msg) if msg else "Uygun snapshot bulunamadı."))
     else:
-        await rp(ctx, head("log", "YEDEK DURUMU") + "\n\n" + KV([(e("dot")+"Emoji", len(EMO_CACHE)), (e("dot")+"Pro", len(db.all("SELECT 1 FROM users WHERE pro=1"))), (e("dot")+"HalfOwner", len(db.all("SELECT 1 FROM half_owners"))), (e("dot")+"Ayar", sum(len(v) for v in settings_snapshot().values()))]))
+        await rp(ctx, head("log", "DEPO DURUMU") + "\n\n" + KV([(e("dot")+"Emojiler", len(EMO_CACHE)), (e("dot")+"Pro Üyeler", len(db.all("SELECT 1 FROM users WHERE pro=1"))), (e("dot")+"Half Owners", len(db.all("SELECT 1 FROM half_owners"))), (e("dot")+"Toplam Config Satırı", sum(len(v) for v in settings_snapshot().values()))]))
 @kategori("owner")
-@bot.command(name="istatistik-kanal", help="<#kanal|kapat>")
+@bot.command(name="istatistik-kanal", help="<#kanal|kapat> — Canlı pano yayınlayıcı")
 @is_owner()
 async def istatistik_kanal(ctx, ch: discord.TextChannel = None):
     if ch is None:
-        db.q("DELETE FROM bot_meta WHERE key='stats_ch'"); await rp(ctx, OK("PANO KAPALI"))
+        db.q("DELETE FROM bot_meta WHERE key='stats_ch'"); await rp(ctx, OK("PANO KAPATILDI", "Canlı güncellemeler durduruldu."))
     else:
-        db.q("INSERT OR REPLACE INTO bot_meta(key,value) VALUES('stats_ch',?)", (str(ch.id),)); await rp(ctx, OK("PANO", ch.mention + " • 10 dk'da bir güncellenir"))
+        db.q("INSERT OR REPLACE INTO bot_meta(key,value) VALUES('stats_ch',?)", (str(ch.id),)); await rp(ctx, OK("PANO KURULDU", "Her 10 dakikada bir istatistik kartı **#"+ch.name+"** kanalına basılacaktır."))
 @kategori("owner")
-@bot.command(name="güncelleme-kanal", aliases=["guncelleme-kanal"], help="<#kanal|kapat>")
+@bot.command(name="güncelleme-kanal", aliases=["guncelleme-kanal"], help="<#kanal|kapat> — Changelog duyuru hattı")
 @is_owner()
 async def güncelleme_kanal(ctx, ch: discord.TextChannel = None):
     if ch is None:
-        db.q("DELETE FROM bot_meta WHERE key='update_ch'"); await rp(ctx, OK("KAPALI"))
+        db.q("DELETE FROM bot_meta WHERE key='update_ch'"); await rp(ctx, OK("DUYURU HATTI KAPATILDI"))
     else:
-        db.q("INSERT OR REPLACE INTO bot_meta(key,value) VALUES('update_ch',?)", (str(ch.id),)); await rp(ctx, OK("KANAL", ch.mention))
+        db.q("INSERT OR REPLACE INTO bot_meta(key,value) VALUES('update_ch',?)", (str(ch.id),)); await rp(ctx, OK("DUYURU HATTI AÇILDI", "Her versiyon bump'ında changelog **#"+ch.name+"** kanalına düşecektir."))
 @kategori("owner")
-@bot.command(name="sürüm", aliases=["surum"], help="Sürüm")
-async def sürüm(ctx): await rp(ctx, head("logo", "SÜRÜM v" + BOT_VERSION) + "\n\n" + "\n".join(e("arrow") + " " + n for n in CHANGELOG.get(BOT_VERSION, [])))
+@bot.command(name="sürüm", aliases=["surum"], help="Changelog günlüğünü getirir")
+async def sürüm(ctx): await rp(ctx, head("logo", "CHANGELOG v" + BOT_VERSION) + "\n\n" + "\n".join(e("arrow") + " " + n for n in CHANGELOG.get(BOT_VERSION, [])))
 @kategori("owner")
-@bot.command(name="v2test", help="Components V2 testi")
+@bot.command(name="v2test", help="Components V2 teşhis raporu çıkarır")
 @is_owner()
 async def v2test(ctx):
-    if not HAS_V2:
-        return await rp(ctx, ER("V2 YOK", "discord.py " + discord.__version__ + " → LayoutView yok.\nrequirements: `discord.py>=2.6.0`"))
-    try:
-        await ctx.send(view=_make_lv(head("spark", "V2 TEST") + "\nBu mesajı **çerçeveli kart** olarak görüyorsan V2 çalışıyor!"))
-        await rp(ctx, OK("V2 ÇALIŞIYOR", "LayoutView ✅ • discord.py " + discord.__version__))
-    except Exception as ex:
-        await rp(ctx, ER("V2 HATA", "```\n" + str(ex)[:250] + "\n```\nBot otomatik düz metne geçer — butonlar etkilenmez."))
+    info = ["discord.py Versiyonu: " + discord.__version__]
+    for nm in ("LayoutView", "Container", "TextDisplay", "ActionRow", "Section"):
+        info.append(nm + ": " + ("✅ Mevcut" if hasattr(discord.ui, nm) else "❌ Tanınmadı"))
+    if HAS_V2:
+        try:
+            await ctx.send(view=_make_lv(head("spark", "V2 CANLI TEST") + "\nBu mesajı **çerçeveli gri kart** içinde görüyorsanız Components V2 motorunuz sağlıklı çalışıyor!"))
+            info.append("LayoutView Gönderimi: ✅ Başarılı")
+        except Exception as ex:
+            info.append("LayoutView Gönderimi: ❌ Hata -> " + str(ex)[:60])
+    else:
+        info.append("Motor Durumu: ❌ HAS_V2=False (Legacy moda düşülecek)")
+    await rp(ctx, head("gear", "V2 TEŞHİS RAPORU") + "\n\n" + "\n".join(e("arrow") + " " + i for i in info) + "\n\n(Eğer LayoutView ❌ ise yardım menüsü klasik View'a döner; butonlar yine de çalışır.)")
 @kategori("owner")
-@bot.command(name="emoji", help="<ayarla/yakala/oto/liste/sıfırla/slotlar>")
+@bot.command(name="emoji", help="<ayarla/yakala/oto/liste/sıfırla/slotlar> — Emoji Slot Motoru")
 @is_owner()
 async def emoji_cmd(ctx, i: str = "slotlar", slot: str = None, *, val=None):
     i = i.lower()
     if i in ("ayarla","set"):
-        if not slot or not val or "<" not in val: return await rp(ctx, ER("ÖRNEK", "ayarla check <:x:123>"))
+        if not slot or not val or "<" not in val: return await rp(ctx, ER("FORMAT", "Örnek: `k!emoji ayarla check <:tick:12345>`"))
         slot = slot.lower()
-        if slot not in SLOTS: return await rp(ctx, ER("SLOT", "`k!emoji slotlar`"))
-        db.q("INSERT OR REPLACE INTO emojis(slot,emoji) VALUES(?,?)", (slot, val)); refresh_emojis(); await rp(ctx, OK("EMOJİ +", "`" + slot + "`"))
+        if slot not in SLOTS: return await rp(ctx, ER("SLOT TANIMSIZ", "`k!emoji slotlar` komutuyla uygun isimleri öğren."))
+        db.q("INSERT OR REPLACE INTO emojis(slot,emoji) VALUES(?,?)", (slot, val)); refresh_emojis(); await rp(ctx, OK("SLOT DOLDURULDU", "`" + slot + "` anahtarı artık senin emojini kullanıyor."))
     elif i == "yakala":
-        if not slot: return await rp(ctx, ER("ÖRNEK", "yakala check"))
+        if not slot: return await rp(ctx, ER("HEDEF SLOT YOK", "Örnek: `k!emoji yakala check` (yanıtlayarak)"))
         ref = ctx.message.reference; mg = ref.resolved if ref else None
-        if not mg: return await rp(ctx, ER("YANITLA"))
+        if not mg: return await rp(ctx, ER("REFERANS YOK", "Lütfen emojinin bulunduğu mesaja REPLY atarak bu komutu çalıştır."))
         f = str(mg.emojis[0]) if mg.emojis else None
         if not f:
             mm = re.search(r"<a?:[a-zA-Z0-9_]+:\d+>", mg.content or ""); f = mm.group(0) if mm else None
-        if not f: return await rp(ctx, ER("EMOJİ YOK"))
-        db.q("INSERT OR REPLACE INTO emojis(slot,emoji) VALUES(?,?)", (slot.lower(), f)); refresh_emojis(); await rp(ctx, OK("YAKALANDI", "`" + slot + "`"))
+        if not f: return await rp(ctx, ER("EMOJİ BULUNAMADI", "Hedef mesajda özel bir emoji algılanamadı."))
+        db.q("INSERT OR REPLACE INTO emojis(slot,emoji) VALUES(?,?)", (slot.lower(), f)); refresh_emojis(); await rp(ctx, OK("YAKALANDI", "`" + slot + "` slotuna başarılı şekilde bağlandı."))
     elif i == "oto":
         mp = auto_map_emojis(ctx.guild)
-        if not mp: return await rp(ctx, WN("EŞLEŞME YOK", "`k!emoji yakala <slot>` dene."))
-        await rp(ctx, OK("OTO EMOJİ", "**" + str(len(mp)) + "** slot dolduruldu"))
+        if not mp: return await rp(ctx, WN("EŞLEŞME YOK", "Sunucundaki emojiler standart anahtarlarla örtüşmedi."))
+        await rp(ctx, OK("OTO MATÇ TAMAM", "**" + str(len(mp)) + "** adet slot otomatik olarak dolduruldu."))
     elif i in ("liste","list"):
         rs = db.all("SELECT * FROM emojis")
-        await rp(ctx, head("star", "AYARLI EMOJİLER") + "\n\n" + ("\n".join(e("arrow") + " `" + r["slot"] + "` " + r["emoji"] for r in rs) if rs else "Boş"))
+        await rp(ctx, head("star", "AKTİF EMOJİ HARİTASI") + "\n\n" + ("\n".join(e("arrow") + " `" + r["slot"] + "` " + r["emoji"] for r in rs) if rs else "Manuel atama yok."))
     elif i in ("sıfırla","reset"):
         if slot in (None,"tümü","all"): db.q("DELETE FROM emojis")
         else: db.q("DELETE FROM emojis WHERE slot=?", (slot.lower(),))
-        refresh_emojis(); await rp(ctx, OK("SIFIRLANDI"))
+        refresh_emojis(); await rp(ctx, OK("TEMİZLENDİ", "Varsayılan sistem emojilerine dönüldü."))
     else:
-        await rp(ctx, head("info", "SLOTLAR") + "\n\n`" + "`, `".join(SLOTS.keys()) + "`")
+        await rp(ctx, head("info", "KULLANILABİLİR SLOT ANAHTARLARI") + "\n\n`" + "`, `".join(SLOTS.keys()) + "`")
 @kategori("owner")
-@bot.command(name="prover", help="<@üye> [gün]")
+@bot.command(name="prover", help="<@üye> [gün_sayısı] — Birine Pro yetkisi ata")
 @is_half()
 async def prover(ctx, u: discord.Member, g: int = 30):
     ensure_user(u.id, str(u)); ex = (datetime.datetime.now() + datetime.timedelta(days=g)).isoformat()
     db.q("UPDATE users SET pro=1, pro_expiry=? WHERE user_id=?", (ex, u.id)); pro_log(u.id, "VERİLDİ", g, ctx.author.id)
-    await rp(ctx, OK("PRO VERİLDİ", u.mention + " • **" + str(g) + " gün**"))
-    try: await u.send(OK("PRO OLDUN", str(g) + " gün PRO!"))
+    await rp(ctx, OK("PRO YETKİSİ VERİLDİ", "**" + str(u) + "** kullanıcısına **" + str(g) + " günlük** PRO aboneliği tanımlandı."))
+    try: await u.send(OK("TEBRİKLER!", "Bir yönetici tarafından **" + str(g) + " gün** PRO statüsü kazandın! Ayrıcalıkların için `k!pro` yaz."))
     except Exception: pass
 @kategori("owner")
-@bot.command(name="proal", help="<@üye>")
+@bot.command(name="proal", help="<@üye> — Pro yetkisini elinden al")
 @is_half()
 async def proal(ctx, u: discord.Member):
-    db.q("UPDATE users SET pro=0, pro_expiry=NULL WHERE user_id=?", (u.id)); pro_log(u.id, "ALINDI", 0, ctx.author.id); await rp(ctx, WN("PRO ALINDI", u.mention))
+    db.q("UPDATE users SET pro=0, pro_expiry=NULL WHERE user_id=?", (u.id)); pro_log(u.id, "ALINDI", 0, ctx.author.id); await rp(ctx, WN("PRO İPTAL EDİLDİ", "**" + str(u) + "** standard üyeliğe düşürüldü."))
 @kategori("owner")
-@bot.command(name="prologlar", help="Log")
+@bot.command(name="prologlar", help="[<@üye>] — Pro işlem geçmişini denetle")
 @is_half()
 async def prologlar(ctx, u: discord.User = None):
     rs = db.all("SELECT * FROM pro_logs WHERE user_id=? ORDER BY id DESC LIMIT 15", (u.id,)) if u else db.all("SELECT * FROM pro_logs ORDER BY id DESC LIMIT 15")
-    if not rs: return await rp(ctx, ER("KAYIT YOK"))
-    await rp(ctx, head("log", "PRO LOG") + "\n\n" + "\n".join(e("arrow") + " **" + r["action"] + "** <@" + str(r["user_id"]) + "> • " + r["ts"][:10] for r in rs))
+    if not rs: return await rp(ctx, INFO("BOŞ LOG", "Kayıtlı hareket bulunmuyor."))
+    await rp(ctx, head("log", "PRO DENETİM KAYDI") + "\n\n" + "\n".join(e("arrow") + " **" + r["action"] + "** <@" + str(r["user_id"]) + "> • " + r["ts"][:10] for r in rs))
 @kategori("owner")
-@bot.command(name="prefix", help="<yeni>")
+@bot.command(name="prefix", help="<yeni_prefix> — Sunucuya özel komut başlangıcını değiştir")
 @is_owner()
 async def prefix(ctx, y: str):
-    ensure_server(ctx.guild.id); db.q("UPDATE servers SET prefix=? WHERE guild_id=?", (y, ctx.guild.id)); await rp(ctx, OK("PREFIX", "`" + y + "`"))
+    ensure_server(ctx.guild.id); db.q("UPDATE servers SET prefix=? WHERE guild_id=?", (y, ctx.guild.id)); await rp(ctx, OK("PREFIX DEĞİŞTİ", "Artık komutlar **" + y + "** ile başlayacaktır."))
 @kategori("owner")
-@bot.command(name="blacklist", aliases=["bl"], help="<ekle/çıkar> <@üye>")
+@bot.command(name="blacklist", aliases=["bl"], help="<ekle/çıkar> <@üye> — Global Kara Liste")
 @is_owner()
 async def blacklist(ctx, i: str, u: discord.User, *, s="—"):
     if i.lower() in ("ekle","add"):
-        db.q("INSERT OR REPLACE INTO blacklist(user_id,reason) VALUES(?,?)", (u.id, s)); await rp(ctx, OK("KARALİSTE +", u.mention))
+        db.q("INSERT OR REPLACE INTO blacklist(user_id,reason) VALUES(?,?)", (u.id, s)); await rp(ctx, OK("KARA LİSTEYE ALINDI", "**" + str(u) + "** artık hiçbir sunucuda botu kullanamaz."))
     elif i.lower() in ("çıkar","remove"):
-        db.q("DELETE FROM blacklist WHERE user_id=?", (u.id,)); await rp(ctx, OK("KARALİSTE -", u.mention))
-    else: await rp(ctx, ER("KOMUT", "ekle / çıkar"))
+        db.q("DELETE FROM blacklist WHERE user_id=?", (u.id,)); await rp(ctx, OK("LİSTEDEN ÇIKARILDI", "**" + str(u) + "** tekrar serbest bırakıldı."))
+    else: await rp(ctx, ER("GEÇERSİZ PARAMETRE", "`k!blacklist ekle @User` veya `k!blacklist çıkar @User`"))
 @kategori("owner")
-@bot.command(name="durum", aliases=["status"], help="<metin>")
+@bot.command(name="durum", aliases=["status"], help="<metin> — Botun Watch/Playing durumunu elle ayarla")
 @is_owner()
 async def durum(ctx, *, m):
-    await bot.change_presence(activity=discord.Activity(type=discord.ActivityType.watching, name=m)); await rp(ctx, OK("DURUM", m[:60]))
+    await bot.change_presence(activity=discord.Activity(type=discord.ActivityType.watching, name=m)); await rp(ctx, OK("DURUM GÜNCELLENDİ", "Bot profili şimdi şunu izliyor: **" + m[:60] + "**"))
 @kategori("owner")
-@bot.command(name="sunucular", aliases=["guilds"], help="Liste")
+@bot.command(name="sunucular", aliases=["guilds"], help="Botun entegre olduğu tüm sunucuları listeler")
 @is_owner()
 async def sunucular(ctx):
     rs = sorted(bot.guilds, key=lambda g: -(g.member_count or 0))
-    await rp(ctx, head("owner", "SUNUCULAR") + "\n\n" + "\n".join(e("arrow") + " **" + g.name + "** ─ " + str(g.member_count) for g in rs[:15]))
+    await rp(ctx, head("owner", "ENTEGRE SUNUCULAR") + "\n\n" + "\n".join(e("arrow") + " **" + g.name + "** ─ " + str(g.member_count) + " üye" for g in rs[:15]))
 @kategori("owner")
-@bot.command(name="eval", aliases=["py"], help="<kod>")
+@bot.command(name="eval", aliases=["py"], help="<kod> — Python konsolu (Danger Zone)")
 @is_owner()
 async def eval_cmd(ctx, *, code):
     env = {"bot": bot, "ctx": ctx, "db": db, "discord": discord, "guild": ctx.guild, "author": ctx.author}
@@ -2112,8 +2125,8 @@ async def eval_cmd(ctx, *, code):
     try:
         exec(compile(fn, "<e>", "exec"), env)
         with redirect_stdout(buf): await env["__f"]()
-        await ctx.send("```py\n" + (buf.getvalue()[:1900] or "OK") + "\n```")
-    except Exception as ex: await ctx.send("```py\n" + str(ex)[:1900] + "\n```")
+        await ctx.send("```py\n" + (buf.getvalue()[:1900] or "Executed Successfully") + "\n```")
+    except Exception as ex: await ctx.send("```py\nTraceback:\n" + str(ex)[:1900] + "\n```")
 
 # ═══════════════════════════════════════════════════════════════════
 # 🚀 BAŞLAT
