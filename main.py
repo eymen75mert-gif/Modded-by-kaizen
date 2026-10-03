@@ -50,7 +50,7 @@ BACKUP_CH = int(os.getenv("BACKUP_CHANNEL_ID", "0"))
 MARKER = "#KATRE_YEDEK"
 DIV = "──────────────────────────────"
 PAGE_SIZE = 15
-BOT_VERSION = "6.3"
+BOT_VERSION = "6.4"
 CHANGELOG = {
     "6.3": [
         "📚 Full log kapsamı genişletildi: ban/unban, timeout, üye rol/nick değişimi, kanal/rol, davet, webhook, thread, emoji/sticker ve komut olayları",
@@ -2395,7 +2395,7 @@ async def hoşgeldinmesaj(ctx, *, mesaj: str = None):
     await rp(ctx, OK("HOŞ GELDİN ŞABLONU AYARLANDI", "Yeni üyelerde bu Components V2 mesajı kullanılacak.\nDeğişkenler: `{mention}` `{user}` `{name}` `{server}` `{count}` `{id}` `{account_age}` `{created}` `{joined}`"))
 
 @kategori("mod")
-@bot.command(name="ayrilmamesaj", aliases=["ayrilmamesaj","ayrılmamesaj"], help="[mesaj|sıfırla] — ayrılma şablonunu ayarla")
+@bot.command(name="ayrilmamesaj", aliases=["ayrılmamesaj"], help="[mesaj|sıfırla] — ayrılma şablonunu ayarla")
 @commands.has_permissions(administrator=True)
 async def ayrilmamesaj(ctx, *, mesaj: str = None):
     ensure_server(ctx.guild.id)
@@ -3544,7 +3544,7 @@ async def komuttest(ctx):
     p = ", ".join("`" + str(x) + "`" for x in prefs[:8])
     await rp(ctx, OK("KOMUT SİSTEMİ ÇALIŞIYOR", "Prefixler: " + p + "\nMesaj: `" + ctx.message.content[:120].replace("`", "ˋ") + "`\nKayıtlı komut: **" + str(len(bot.commands)) + "**"))
 @kategori("genel")
-@bot.command(name="prefix", aliases=["önek", "onek"], help="Sunucu prefixini gösterir")
+@bot.command(name="prefixgoster", aliases=["önek", "onek", "prefixbilgi"], help="Sunucu prefixini gösterir")
 async def prefix_show(ctx):
     prefs = await bot.get_prefix(ctx.message)
     custom = [x for x in prefs if x not in {"k!", "K!"} and not x.startswith("<@")]
@@ -3608,4 +3608,4 @@ async def saril(ctx, u: discord.Member):
 # 🚀 BAŞLAT
 # ═══════════════════════════════════════════════════════════════════
 if __name__ == "__main__":
-    bot.run(BOT_TOKEN)
+    bot.run(BOT_TOKEN
