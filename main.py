@@ -1,5 +1,5 @@
 # ═══════════════════════════════════════════════════════════════════
-#  💧 KATRE BOT v5.4 — BÖLÜM 1/2 • PREMİUM KART • V2 TİCKET • V2 YARDIM
+#  💧 KATRE BOT v5.5 — BÖLÜM 1/2 • PREMİUM KART • V2 TİCKET • V2 YARDIM • YENİ KOMUTLAR
 #  ENV: BOT_TOKEN, OWNER_ID, SUPPORT_URL, BACKUP_CHANNEL_ID
 #  requirements.txt: discord.py>=2.6.0
 # ═══════════════════════════════════════════════════════════════════
@@ -40,8 +40,16 @@ BACKUP_CH = int(os.getenv("BACKUP_CHANNEL_ID", "0"))
 MARKER = "#KATRE_YEDEK"
 DIV = "──────────────────────────────"
 PAGE_SIZE = 15
-BOT_VERSION = "5.4"
+BOT_VERSION = "5.5"
 CHANGELOG = {
+    "5.5": [
+        "🛠️ Yardım menüsünde kategori seçimi düzeltildi: menüden seçince kategori artık açılıyor",
+        "📌 Yardım menüsünde seçili kategori işaretleniyor, ana menüde rastgele ipucu gösteriliyor",
+        "✨ Rank, profil ve sunucu kartları avatar/ikonlu yeni tasarıma geçti; rank'a sıralama ve kalan XP eklendi",
+        "👋 Hoş geldin mesajı avatarlı kart oldu, hesap yaşı gösteriliyor",
+        "🏓 `k!ping` artık websocket ve mesaj gecikmesini kalite çubuğuyla gösteriyor",
+        "🆕 Yeni komutlar: `k!kullanıcıbilgi`, `k!kanalbilgi`, `k!botbilgi`, `k!hesapla`, `k!sarıl`, `k!ipucu`",
+    ],
     "5.4": [
         "🎨 Tüm cevaplar yeni premium kart tasarımında: büyük başlık, ayırıcı, içerik ve duruma göre alt bilgi",
         "🌈 Cevap türüne göre özel renk şeridi: başarılı, hata, uyarı, ekonomi, ticket, eğlence ve daha fazlası",
@@ -204,7 +212,7 @@ def head(i, t): return _q(e(i) + " **" + t + "**\n" + DIV)
 def OK(t, b=None): return head("check", t) + ("\n" + _q(b) if b else "")
 def ER(t, b=None): return head("cross", t) + ("\n" + _q(b) if b else "")
 def WN(t, b=None): return head("warn", t) + ("\n" + _q(b) if b else "")
-_KFIX = re.compile(r"^(<a?:\w+:\d+>|[^\w\s]+)(?=\w)")
+_KFIX = re.compile(r"^(<a?:\w+:\d+>|[^\x00-\x7FçğıöşüÇĞİÖŞÜ]+?)(?=[A-Za-z0-9çğıöşüÇĞİÖŞÜ])")
 def _kfix(k): return _KFIX.sub(lambda m: m.group(1) + " ", str(k))
 def KV(ps): return _q("\n".join(_kfix(k) + " › **" + str(v) + "**" for k, v in ps))
 def bar(p, ln=14):
@@ -329,6 +337,28 @@ async def sendf_eph(it, text):
     try: return await it.followup.send(text, ephemeral=True)
     except Exception: return None
 
+def card_thumb(text, url, accent=None, rows=()):
+    title, rest = _card_parts(text); kind = _kind(title)
+    con = _new_con(accent if accent is not None else _accent(title))
+    ht = ("## " + title.replace("**", "").strip())[:300]
+    item = None
+    if Section is not None and Thumbnail is not None and url:
+        try: item = Section(TextDisplay(ht), accessory=Thumbnail(str(url)))
+        except Exception: item = None
+    con.add_item(item or TextDisplay(ht))
+    if rest:
+        _sep(con); con.add_item(TextDisplay(rest[:3400]))
+    for r in rows: con.add_item(r)
+    _sep(con, False); con.add_item(TextDisplay(_foot(kind)))
+    try: lv = LayoutView(timeout=None)
+    except TypeError: lv = LayoutView()
+    lv.add_item(con); return lv
+async def send_thumb(sendable, text, url, accent=None, rows=()):
+    if V2_OK:
+        try: return await sendable.send(view=card_thumb(text, url, accent, rows))
+        except Exception: traceback.print_exc()
+    return await v2_text(sendable, text)
+
 async def v2_text(sendable, text, eph=False):
     if HAS_V2:
         try:
@@ -396,7 +426,7 @@ async def guild_log_send(g, t):
             try: await rp_ch(ch, t); return True
             except Exception: pass
     return False
-VERSION_TAGLINE = {"5.4": "Premium kartlar • V2 ticket • yeni yardım menüsü", "5.3": "Açıklayıcı hatalar • TDK kelime oyunu", "5.2": "Duyuru sistemi • V2 yardım"}
+VERSION_TAGLINE = {"5.5": "Yardım menüsü düzeltmesi • avatarlı kartlar • 6 yeni komut", "5.4": "Premium kartlar • V2 ticket • yeni yardım menüsü", "5.3": "Açıklayıcı hatalar • TDK kelime oyunu", "5.2": "Duyuru sistemi • V2 yardım"}
 def update_text(ver, prev=None):
     L = [e("party") + " **KATRE v" + ver + " YAYINDA!**", DIV, e("spark") + " " + VERSION_TAGLINE.get(ver, "Yeni sürüm yayında")]
     ns = CHANGELOG.get(ver, [])
@@ -467,13 +497,17 @@ CATS = {"genel":("genel","Genel & Sistem"),"mod":("mod","Moderasyon & Koruma"),"
 CAT_DESC = {"genel":"Rank, profil, avatar, snipe, AFK, oda","mod":"Ban, kick, unban, mute, uyarı, oto-ceza, koruma","sys":"Başvuru, ticket, temp voice, kelime oyunu, log","eco":"Coin, günlük, çalışma, balık, maden, market","fun":"Quiz, slot, aşk, anket ve oyunlar","give":"Butonlu çekiliş, reroll, sonuç paneli","pro":"Pro oda, rol, bonus, banner, şans","owner":"Owner + Half Owner paneli, duyuru"}
 def cat_count(b, k): return len([c for c in b.commands if getattr(c, "kategori", None) == k])
 HELP_COLORS = {"genel":0x5865F2,"mod":0xE67E22,"sys":0x1ABC9C,"eco":0xF1C40F,"fun":0x9B59B6,"give":0xEB459E,"pro":0x00D9FF,"owner":0xFEE75C}
+HELP_TIPS = ["`k!günlük` ile her gün ücretsiz coin topla.", "`k!rank` ile seviyeni ve sıralamanı gör.", "`k!destek` paneliyle sunucunda ticket sistemi kurabilirsin.",
+    "`k!afk <sebep>` yazınca seni etiketleyenlere sebebi gösteririm.", "`k!oylama soru | seçenek1 | seçenek2` ile hızlı anket aç.", "`k!hesapla 12*(3+4)` ile hızlı hesap yap.",
+    "`k!komutbilgi <komut>` ile bir komutun kullanımını öğren.", "`k!çekiliş` ile butonlu çekiliş başlatabilirsin.", "`k!kullanıcıbilgi @üye` ile üye hakkında detaylı bilgi al.",
+    "`k!sarıl @üye` ile birine sıcak bir sarılma gönder."]
 def help_content(bot):
     L = ["## " + e("logo") + " " + bot.user.name.upper() + " • YARDIM MERKEZİ", DIV,
          "Selam! Ben **" + bot.user.name + "** " + e("spark") + " — moderasyon, ekonomi, eğlence, ticket ve çok daha fazlası tek botta.", "",
          e("chart") + " **" + str(len(bot.commands)) + "** komut  •  " + e("genel") + " **" + str(len(bot.guilds)) + "** sunucu  •  " + e("tag") + " önek `k!`", "",
          e("star") + " **KATEGORİLER**"]
     for k in CATS: L += [e(k) + " **" + CATS[k][1] + "** `" + str(cat_count(bot, k)) + "`", "-# " + CAT_DESC[k]]
-    L += ["", "-# " + e("arrow") + " Menüden bir kategori seç  •  Detay: `k!komutbilgi <komut>`", e("link") + " Destek: " + SUPPORT_URL]
+    L += ["", e("spark") + " **İpucu:** " + random.choice(HELP_TIPS), "", "-# " + e("arrow") + " Menüden bir kategori seç  •  Detay: `k!komutbilgi <komut>`", e("link") + " Destek: " + SUPPORT_URL]
     return "\n".join(L)
 def cat_content(bot, key, page=1):
     cmds = sorted([c for c in bot.commands if getattr(c, "kategori", None) == key], key=lambda x: x.name)
@@ -514,14 +548,21 @@ def help_v2(bot, text):
     con.add_item(item or TextDisplay(heading[:300]))
     if rest:
         _sep(con); con.add_item(TextDisplay(rest[:3400]))
+    cur = None
+    for k in CATS:
+        if e(k) in title and CATS[k][1].upper() in title: cur = k; break
     sel = Select(placeholder="📂 Kategori seç...", min_values=1, max_values=1, custom_id="kv_sel",
-                 options=[discord.SelectOption(label=CATS[k][1], value=k, emoji=SLOTS.get(k, "•"), description=CAT_DESC[k][:90]) for k in CATS])
+                 options=[discord.SelectOption(label=CATS[k][1], value=k, emoji=SLOTS.get(k, "•"), description=CAT_DESC[k][:90], default=(k == cur)) for k in CATS])
     async def sel_cb(it):
-        await it.response.defer()
-        key = it.values[0]
-        if key == "owner" and it.user.id != OWNER_ID and not is_half_owner(it.user.id):
-            return await it.edit_original_response(view=help_v2(bot, ER("YETKİ YOK", "Owner paneli sadece bot sahibine ve yardımcılarına açık.")))
-        await it.edit_original_response(view=help_v2(bot, cat_content(bot, key, 1)))
+        try:
+            key = sel.values[0]
+            if key == "owner" and it.user.id != OWNER_ID and not is_half_owner(it.user.id):
+                return await sendv_eph(it, ER("YETKİ YOK", "Owner kategorisi sadece bot sahibine ve yardımcılarına açık."))
+            await it.response.edit_message(view=help_v2(bot, cat_content(bot, key, 1)))
+        except Exception as ex:
+            traceback.print_exc()
+            try: await sendv_eph(it, ER("MENÜ HATASI", "Kategori açılamadı.\n`" + str(ex)[:150] + "`"))
+            except Exception: pass
     sel.callback = sel_cb
     _sep(con, False); con.add_item(_row(sel))
     async def prev(it): await _pg2(bot, it, -1)
@@ -1387,7 +1428,7 @@ class KatreBot(commands.Bot):
             if s["welcome_ch"]:
                 ch = mb.guild.get_channel(s["welcome_ch"])
                 if ch:
-                    try: await rp_ch(ch, head("wave", "HOŞ GELDİN") + "\n\n### " + mb.mention + "\n" + e("party") + " **" + str(mb.guild.member_count) + "** üye!")
+                    try: await send_thumb(ch, head("wave", "HOŞ GELDİN!") + "\n\n### " + mb.mention + "\n" + e("party") + " Aramıza katıldığın için çok sevindik! Sen **" + str(mb.guild.member_count) + ".** üyemizsin.\n\n" + KV([(e("alarm")+"Hesap açılışı", "<t:" + str(int(mb.created_at.timestamp())) + ":R>"), (e("dot")+"Sunucu", mb.guild.name)]) + tip("Kurallara göz atmayı ve kendini tanıtmayı unutma!"), mb.display_avatar.url, accent=0x57F287)
                     except Exception: pass
         try:
             c = db.one("SELECT * FROM counters WHERE guild_id=?", (mb.guild.id,))
@@ -1462,8 +1503,13 @@ async def komutbilgi(ctx, *, name: str):
 @kategori("genel")
 @bot.command(name="ping", help="Gecikme")
 async def ping(ctx):
-    ms = round(bot.latency * 1000)
-    await rp(ctx, head("bolt", "PONG!") + "\n\nBot gecikmesi: **" + str(ms) + " ms**\nDurum: " + ("harika, çok hızlıyım! 🚀" if ms < 100 else "normal seviyede ✅" if ms < 200 else "biraz yoğunum ama çalışıyorum ⚠️"))
+    ms = round(bot.latency * 1000); t0 = time.perf_counter(); m = await ctx.send("🏓")
+    rt = round((time.perf_counter() - t0) * 1000)
+    try: await m.delete()
+    except Exception: pass
+    q = max(0, min(100, int(100 - ms / 4)))
+    dr = "harika, çok hızlıyım! 🚀" if ms < 100 else "normal seviyede ✅" if ms < 200 else "biraz yoğunum ama çalışıyorum ⚠️"
+    await rp(ctx, head("bolt", "PONG!") + "\n\n" + KV([(e("dot")+"Websocket", str(ms) + " ms"), (e("dot")+"Mesaj gecikmesi", str(rt) + " ms")]) + "\n\n**Bağlantı kalitesi**\n" + bar(q) + "\nDurum: " + dr)
 @kategori("genel")
 @bot.command(name="istatistik", aliases=["stats"], help="Bot istatistiği")
 async def istatistik(ctx):
@@ -1515,8 +1561,12 @@ async def oda(ctx, i: str = "bilgi", *, arg=None):
 @bot.command(name="rank", aliases=["seviye","level"], help="Seviye kartı")
 @commands.cooldown(1, 3, commands.BucketType.user)
 async def rank(ctx, u: discord.Member = None):
-    u = u or ctx.author; ensure_user(u.id, str(u)); d = db.one("SELECT * FROM users WHERE user_id=?", (u.id,)); nd = d["level"] * 100
-    await rp(ctx, head("chartup", u.display_name + " • SEVİYE KARTI") + "\n\n" + KV([(e("dot")+"Seviye", d["level"]), (e("dot")+"XP", str(d["xp"]) + " / " + str(nd)), (e("dot")+"Mesaj", d["messages"])]) + "\n" + bar(d["xp"] / nd * 100) + tip("Sohbet ederek XP kazanırsın; seviye atlayınca coin ödülü alırsın."))
+    u = u or ctx.author; ensure_user(u.id, str(u)); d = db.one("SELECT * FROM users WHERE user_id=?", (u.id,)); nd = max(1, d["level"] * 100)
+    pos = db.one("SELECT COUNT(*)+1 AS p FROM users WHERE level>? OR (level=? AND xp>?)", (d["level"], d["level"], d["xp"]))["p"]
+    pct = int(d["xp"] / nd * 100)
+    txt = (head("chartup", u.display_name + " • SEVİYE KARTI") + "\n\n" + KV([(e("star")+"Seviye", d["level"]), (e("crown")+"Sıralama", "#" + str(pos)), (e("bolt")+"XP", str(d["xp"]) + " / " + str(nd)), (e("pen")+"Mesaj", d["messages"])])
+           + "\n\n**Sonraki seviyeye**\n" + bar(pct) + "\n-# Kalan XP: **" + str(max(0, nd - d["xp"])) + "**" + tip("Sohbet ederek XP kazanırsın; seviye atlayınca coin ödülü alırsın."))
+    await send_thumb(ctx, txt, u.display_avatar.url, accent=0x3498DB)
 @kategori("genel")
 @bot.command(name="sıralama", aliases=["sirala","top","lb"], help="Seviye top10")
 async def sıralama(ctx):
@@ -1527,12 +1577,22 @@ async def sıralama(ctx):
 @bot.command(name="profil", aliases=["profile"], help="Profil")
 async def profil(ctx, u: discord.Member = None):
     u = u or ctx.author; ensure_user(u.id, str(u)); d = db.one("SELECT * FROM users WHERE user_id=?", (u.id,)); a = db.one("SELECT * FROM afk WHERE user_id=?", (u.id,))
-    await rp(ctx, head("logo", u.display_name + " • PROFİL") + "\n\nÜyenin genel özeti:\n" + KV([(e("dot")+"Seviye", d["level"]), (e("dot")+"Coin", d["coins"]), (e("dot")+"İtibar", d["rep"]), (e("dot")+"Mesaj", d["messages"]), (e("dot")+"Pro", "Evet ✅" if d["pro"] else "Hayır"), (e("dot")+"AFK", "Evet 💤" if a else "Hayır")]))
+    col = None
+    try:
+        if d["pro"] and d["pro_color"]: col = int(str(d["pro_color"]).lstrip("#"), 16)
+    except Exception: col = None
+    jn = int(u.joined_at.timestamp()) if u.joined_at else int(u.created_at.timestamp())
+    txt = (head("logo", u.display_name + " • PROFİL") + "\n\n" + KV([(e("star")+"Seviye", d["level"]), (e("coin")+"Coin", d["coins"]), (e("heart")+"İtibar", d["rep"]), (e("pen")+"Mesaj", d["messages"]),
+           (e("diamond")+"Pro", "Evet ✅" if d["pro"] else "Hayır"), (e("sleep")+"AFK", "Evet 💤" if a else "Hayır"), (e("wave")+"Sunucuya katılım", "<t:" + str(jn) + ":D>"), (e("crown")+"En yüksek rol", u.top_role.mention if u.top_role.id != ctx.guild.id else "—")]))
+    await send_thumb(ctx, txt, u.display_avatar.url, accent=(col or 0x5865F2))
 @kategori("genel")
 @bot.command(name="sunucubilgi", aliases=["serverinfo"], help="Sunucu")
 async def sunucubilgi(ctx):
-    g = ctx.guild
-    await rp(ctx, head("logo", g.name) + "\n\nSunucunun temel bilgileri:\n" + KV([(e("dot")+"Kurucu", "<@" + str(g.owner_id) + ">"), (e("dot")+"Üye", g.member_count), (e("dot")+"Kanal", len(g.channels)), (e("dot")+"Rol", len(g.roles)), (e("dot")+"Kuruluş", g.created_at.strftime("%d.%m.%Y"))]))
+    g = ctx.guild; bots = sum(1 for m in g.members if m.bot); mc = g.member_count or len(g.members)
+    txt = (head("logo", g.name + " • SUNUCU BİLGİSİ") + "\n\n" + KV([(e("crown")+"Kurucu", "<@" + str(g.owner_id) + ">"), (e("genel")+"Üye", str(mc) + " (" + str(max(0, mc - bots)) + " kişi • " + str(bots) + " bot)"),
+           (e("pen")+"Kanal", str(len(g.text_channels)) + " metin • " + str(len(g.voice_channels)) + " ses"), (e("tag")+"Rol", len(g.roles)), (e("spark")+"Emoji", len(g.emojis)),
+           (e("bolt")+"Boost", "Seviye " + str(g.premium_tier) + " • " + str(g.premium_subscription_count or 0) + " takviye"), (e("alarm")+"Kuruluş", "<t:" + str(int(g.created_at.timestamp())) + ":D>")]) + "\n-# ID: " + str(g.id))
+    await send_thumb(ctx, txt, g.icon.url if g.icon else None, accent=0x5865F2)
 @kategori("genel")
 @bot.command(name="snipe", help="Silinen son mesaj")
 @commands.cooldown(1, 3, commands.BucketType.user)
@@ -2544,6 +2604,75 @@ async def eval_cmd(ctx, *, code):
         with redirect_stdout(buf): await env["__f"]()
         await ctx.send("```py\n" + (buf.getvalue()[:1900] or "OK") + "\n```")
     except Exception as ex: await ctx.send("```py\n" + str(ex)[:1900] + "\n```")
+
+# ═══════════════════════════════════════════════════════════════════
+# 🆕 v5.5 YENİ KOMUTLAR
+# ═══════════════════════════════════════════════════════════════════
+import ast, operator
+_CALC_OPS = {ast.Add: operator.add, ast.Sub: operator.sub, ast.Mult: operator.mul, ast.Div: operator.truediv, ast.FloorDiv: operator.floordiv, ast.Mod: operator.mod, ast.Pow: operator.pow, ast.USub: operator.neg, ast.UAdd: operator.pos}
+def _calc(n):
+    if isinstance(n, ast.Expression): return _calc(n.body)
+    if isinstance(n, ast.Constant) and isinstance(n.value, (int, float)) and not isinstance(n.value, bool): return n.value
+    if isinstance(n, ast.BinOp) and type(n.op) in _CALC_OPS:
+        a, b = _calc(n.left), _calc(n.right)
+        if isinstance(n.op, ast.Pow) and (abs(b) > 100 or abs(a) > 1000000): raise ValueError("Üs çok büyük")
+        return _CALC_OPS[type(n.op)](a, b)
+    if isinstance(n, ast.UnaryOp) and type(n.op) in _CALC_OPS: return _CALC_OPS[type(n.op)](_calc(n.operand))
+    raise ValueError("Desteklenmeyen ifade")
+@kategori("genel")
+@bot.command(name="hesapla", aliases=["calc", "hesap"], help="<işlem> — hesap makinesi")
+@commands.cooldown(1, 2, commands.BucketType.user)
+async def hesapla(ctx, *, ifade: str):
+    raw = ifade.strip()[:100]; ex = raw.replace(",", ".").replace("×", "*").replace("÷", "/").replace("^", "**").replace("x", "*") if re.fullmatch(r"[\d\s.,+\-*/%()^x×÷]+", raw) else raw
+    try:
+        v = _calc(ast.parse(ex, mode="eval"))
+        if isinstance(v, float): v = int(v) if v == int(v) and abs(v) < 1e15 else round(v, 10)
+        await rp(ctx, OK("HESAPLANDI", "`" + raw + "` = **" + str(v) + "** 🧮"))
+    except ZeroDivisionError:
+        await rp(ctx, ER("SIFIRA BÖLÜNEMEZ", "Bir sayıyı sıfıra bölemezsin. 🙃"))
+    except Exception as ex2:
+        await rp(ctx, ER("HESAPLANAMADI", "İfadeyi anlayamadım: `" + str(ex2)[:60] + "`\nÖrnek: `k!hesapla 12*(3+4)`\nDesteklenenler: `+ - * / // % ** ( )`"))
+@kategori("genel")
+@bot.command(name="kullanıcıbilgi", aliases=["userinfo", "ui", "kb"], help="[@üye] — detaylı üye bilgisi")
+@commands.cooldown(1, 3, commands.BucketType.user)
+async def kullanicibilgi(ctx, u: discord.Member = None):
+    u = u or ctx.author; cr = int(u.created_at.timestamp()); jn = int(u.joined_at.timestamp()) if u.joined_at else cr
+    roller = [r for r in reversed(u.roles) if r.id != ctx.guild.id]
+    txt = (head("search", u.display_name + " • KULLANICI BİLGİSİ") + "\n\n" + KV([(e("dot")+"Kullanıcı", str(u)), (e("dot")+"ID", u.id), (e("alarm")+"Hesap açılışı", "<t:" + str(cr) + ":D>"), (e("wave")+"Sunucuya katılım", "<t:" + str(jn) + ":R>"),
+           (e("crown")+"En yüksek rol", roller[0].mention if roller else "—"), (e("tag")+"Rol sayısı", len(roller)), (e("robot")+"Tür", "Bot" if u.bot else "Üye")]))
+    if roller: txt += "\n\n**Roller**\n" + " ".join(r.mention for r in roller[:12]) + (("  +" + str(len(roller) - 12) + " rol daha") if len(roller) > 12 else "")
+    await send_thumb(ctx, txt, u.display_avatar.url, accent=(u.colour.value or None))
+@kategori("genel")
+@bot.command(name="kanalbilgi", aliases=["channelinfo", "kanal"], help="[#kanal] — kanal bilgisi")
+@commands.cooldown(1, 3, commands.BucketType.user)
+async def kanalbilgi(ctx, ch: discord.TextChannel = None):
+    ch = ch or ctx.channel; sm = getattr(ch, "slowmode_delay", 0) or 0
+    await rp(ctx, head("pen", "#" + str(ch.name) + " • KANAL BİLGİSİ") + "\n\n" + KV([(e("dot")+"Kanal", ch.mention), (e("dot")+"ID", ch.id), (e("clip")+"Kategori", ch.category.name if getattr(ch, "category", None) else "—"),
+        (e("pen")+"Konu", ((getattr(ch, "topic", None) or "—")[:100])), (e("time")+"Yavaş mod", sn_txt(sm) if sm else "Kapalı"), (e("lock")+"NSFW", "Evet 🔞" if getattr(ch, "nsfw", False) else "Hayır"),
+        (e("alarm")+"Oluşturulma", "<t:" + str(int(ch.created_at.timestamp())) + ":D>")]))
+@kategori("genel")
+@bot.command(name="botbilgi", aliases=["about", "hakkında"], help="Bot hakkında")
+@commands.cooldown(1, 5, commands.BucketType.user)
+async def botbilgi(ctx):
+    up = str(datetime.datetime.now() - bot.start_time).split(".")[0]
+    inv = "https://discord.com/oauth2/authorize?client_id=" + str(bot.user.id) + "&permissions=8&scope=bot%20applications.commands"
+    txt = (head("robot", bot.user.name.upper() + " • HAKKINDA") + "\n\nModerasyon, ekonomi, eğlence, ticket ve çekilişleri tek botta toplayan Türkçe Discord botu. 💧\n\n" + KV([(e("tag")+"Sürüm", "v" + BOT_VERSION), (e("genel")+"Sunucu", len(bot.guilds)),
+           (e("dot")+"Kullanıcı", sum(g.member_count or 0 for g in bot.guilds)), (e("gear")+"Komut", len(bot.commands)), (e("alarm")+"Çalışma süresi", up), (e("bolt")+"Ping", str(round(bot.latency * 1000)) + " ms"),
+           (e("robot")+"Altyapı", "discord.py " + discord.__version__ + " • Python " + ".".join(str(x) for x in sys.version_info[:3])), (e("spark")+"V2 kart", "Açık" if V2_OK else "Kapalı")]))
+    rows = [_row(mkbtn("Destek Sunucusu", url=SUPPORT_URL, emoji=e("link")), mkbtn("Botu Ekle", url=inv, emoji="➕"))] if V2_OK else []
+    await send_thumb(ctx, txt, bot.user.display_avatar.url, accent=0x5865F2, rows=rows)
+@kategori("genel")
+@bot.command(name="ipucu", aliases=["tip", "öneri"], help="Rastgele ipucu")
+async def ipucu(ctx):
+    await rp(ctx, head("spark", "RASTGELE İPUCU") + "\n\n" + random.choice(HELP_TIPS) + tip("Daha fazlası için `k!yardım` yaz."))
+SARIL = ["sana kocaman bir sarılma gönderdi! 🤗", "seni sımsıkı sardı! 💞", "sıcacık bir sarılmayla gününü güzelleştirdi! ☀️", "sana ayı gibi sarıldı! 🧸"]
+@kategori("fun")
+@bot.command(name="sarıl", aliases=["hug", "sarilma"], help="<@üye> — sarılma gönder")
+@commands.cooldown(1, 5, commands.BucketType.user)
+async def saril(ctx, u: discord.Member):
+    if u.id == ctx.author.id: return await rp(ctx, WN("KENDİNE SARILMAK", "Kendine sarılmak biraz zor... İstersen ben sarılayım! 🤗"))
+    if u.bot: return await rp(ctx, OK("BOT SARILMASI", "Teşekkürler, çok naziksin ama ben sadece kodum! 💧🤖"))
+    await rp(ctx, head("heart", "SARILMA!") + "\n\n" + ctx.author.mention + ", " + u.mention + " " + random.choice(SARIL))
 
 # ═══════════════════════════════════════════════════════════════════
 # 🚀 BAŞLAT
