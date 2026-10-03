@@ -50,8 +50,13 @@ BACKUP_CH = int(os.getenv("BACKUP_CHANNEL_ID", "0"))
 MARKER = "#KATRE_YEDEK"
 DIV = "──────────────────────────────"
 PAGE_SIZE = 15
-BOT_VERSION = "6.6"
+BOT_VERSION = "6.7"
 CHANGELOG = {
+    "6.7": [
+        "🌐 Türkçe/English kullanıcı arayüzü genişletildi; ortak bot cevapları seçilen dile göre yerelleştiriliyor.",
+        "💎 Dil seçim menüsüne Nitro/custom emoji desteği eklendi (turkey / uk emoji slotları).",
+        "🔄 Dil tercihi SQLite users.language alanında kalıcı olarak saklanıyor.",
+    ],
     "6.6": [
         "🌐 Türkçe/English kullanıcı dil sistemi eklendi; ilk kullanımda Components V2 Select Menu ile dil seçilir.",
         "🔁 `k!language` / `k!dil` / `k!diller` ile dil her zaman değiştirilebilir.",
@@ -258,8 +263,8 @@ def mod_guard(ctx, t, v):
     if ctx.author.top_role <= t.top_role: return "Aynı/üst yetkiliye işlem yapamazsın!"
     return None
 
-SLOTS = {"logo":"💧","check":"✅","cross":"❌","warn":"⚠️","info":"ℹ️","dot":"•","arrow":"»","star":"🌟","spark":"✨","crown":"👑","diamond":"💎","coin":"🪙","money":"💰","gift":"🎁","party":"🎉","shield":"🛡️","hammer":"🔨","kick":"👢","lock":"🔒","unlock":"🔓","gear":"⚙️","chart":"📊","chartup":"📈","heart":"❤️","broken":"💔","ring":"💍","game":"🎮","dice":"🎲","slot":"🎰","fish":"🎣","pick":"⛏️","ticket":"🎫","clip":"📋","pen":"📝","cam":"📸","sleep":"😴","wave":"👋","cake":"🎂","alarm":"⏰","fire":"🔥","bolt":"⚡","mic":"🎙️","palette":"🎨","tag":"🏷️","robot":"🤖","target":"🎯","log":"📜","search":"🔍","time":"⏳","home":"🏠","trash":"🗑️","link":"🔗","genel":"🌐","mod":"🛡️","sys":"📋","eco":"💰","fun":"🎮","give":"🎉","pro":"💎","owner":"👑"}
-EMO_MAP = {"check":["check","tick","tik","onay","yes"],"cross":["cross","carp","iptal","hata","error"],"warn":["warn","uyari","alert"],"info":["info","bilgi"],"star":["star","yildiz"],"spark":["spark","parlak"],"crown":["crown","tac","king"],"diamond":["diamond","elmas","gem"],"coin":["coin","para","money"],"gift":["gift","hediye"],"party":["party","parti","tada"],"shield":["shield","kalkan","guard"],"hammer":["hammer","cekic","ban"],"kick":["kick","boot"],"lock":["lock","kilit"],"gear":["gear","ayar","settings"],"chart":["chart","grafik","stats"],"chartup":["chartup","yukselis","level"],"heart":["heart","kalp","love"],"ring":["ring","yuzuk"],"game":["game","oyun"],"dice":["dice","zar"],"slot":["slot","casino"],"fish":["fish","balik"],"pick":["pick","kazma","mine"],"ticket":["ticket","bilet"],"clip":["clip","pano","basvuru"],"pen":["pen","kalem"],"cam":["cam","kamera"],"sleep":["sleep","afk","uyku"],"wave":["wave","el","hello"],"cake":["cake","kek","dogum"],"alarm":["alarm","saat","clock"],"fire":["fire","ates"],"bolt":["bolt","simsek","boost"],"mic":["mic","mikrofon","ses"],"palette":["palette","palet","renk"],"tag":["tag","rozet"],"robot":["robot","bot"],"target":["target","hedef","sayac"],"log":["log","kayit"],"search":["search","ara"],"time":["time","sure"],"home":["home","ana"],"trash":["trash","cop","sil"],"link":["link","baglanti"]}
+SLOTS = {"logo":"💧","check":"✅","cross":"❌","warn":"⚠️","info":"ℹ️","dot":"•","arrow":"»","star":"🌟","spark":"✨","crown":"👑","diamond":"💎","coin":"🪙","money":"💰","gift":"🎁","party":"🎉","shield":"🛡️","hammer":"🔨","kick":"👢","lock":"🔒","unlock":"🔓","gear":"⚙️","chart":"📊","chartup":"📈","heart":"❤️","broken":"💔","ring":"💍","game":"🎮","dice":"🎲","slot":"🎰","fish":"🎣","pick":"⛏️","ticket":"🎫","clip":"📋","pen":"📝","cam":"📸","sleep":"😴","wave":"👋","cake":"🎂","alarm":"⏰","fire":"🔥","bolt":"⚡","mic":"🎙️","palette":"🎨","tag":"🏷️","robot":"🤖","target":"🎯","log":"📜","search":"🔍","time":"⏳","home":"🏠","trash":"🗑️","link":"🔗","genel":"🌐","mod":"🛡️","sys":"📋","eco":"💰","fun":"🎮","give":"🎉","pro":"💎","owner":"👑","turkey":"🇹🇷","uk":"🇬🇧"}
+EMO_MAP = {"check":["check","tick","tik","onay","yes"],"cross":["cross","carp","iptal","hata","error"],"warn":["warn","uyari","alert"],"info":["info","bilgi"],"star":["star","yildiz"],"spark":["spark","parlak"],"crown":["crown","tac","king"],"diamond":["diamond","elmas","gem"],"coin":["coin","para","money"],"gift":["gift","hediye"],"party":["party","parti","tada"],"shield":["shield","kalkan","guard"],"hammer":["hammer","cekic","ban"],"kick":["kick","boot"],"lock":["lock","kilit"],"gear":["gear","ayar","settings"],"chart":["chart","grafik","stats"],"chartup":["chartup","yukselis","level"],"heart":["heart","kalp","love"],"ring":["ring","yuzuk"],"game":["game","oyun"],"dice":["dice","zar"],"slot":["slot","casino"],"fish":["fish","balik"],"pick":["pick","kazma","mine"],"ticket":["ticket","bilet"],"clip":["clip","pano","basvuru"],"pen":["pen","kalem"],"cam":["cam","kamera"],"sleep":["sleep","afk","uyku"],"wave":["wave","el","hello"],"cake":["cake","kek","dogum"],"alarm":["alarm","saat","clock"],"fire":["fire","ates"],"bolt":["bolt","simsek","boost"],"mic":["mic","mikrofon","ses"],"palette":["palette","palet","renk"],"tag":["tag","rozet"],"robot":["robot","bot"],"target":["target","hedef","sayac"],"log":["log","kayit"],"search":["search","ara"],"time":["time","sure"],"home":["home","ana"],"trash":["trash","cop","sil"],"link":["link","baglanti"],"turkey":["turkey","turkiye","türkiye","trflag","turk"],"uk":["uk","england","britain","unitedkingdom","enflag","ingiltere"]}
 EMO_CACHE = {}
 def refresh_emojis():
     global EMO_CACHE; EMO_CACHE = {r["slot"]: r["emoji"] for r in db.all("SELECT * FROM emojis")}
@@ -485,7 +490,39 @@ async def send_thumb(sendable, text, url, accent=None, rows=()):
         except Exception: traceback.print_exc()
     return await v2_text(sendable, text)
 
+EN_COMMON = {
+    "KOMUT BULUNAMADI":"COMMAND NOT FOUND", "Böyle bir komut yok.":"That command does not exist.",
+    "YETKİ YOK":"NO PERMISSION", "Yetkin yok.":"You do not have permission.",
+    "MENÜ HATASI":"MENU ERROR", "Menü açılamadı.":"The menu could not be opened.",
+    "GEÇERSİZ DEĞER":"INVALID VALUE", "Girdiğin değer geçersiz.":"The value you entered is invalid.",
+    "EKSİK ARGÜMAN":"MISSING ARGUMENT", "BAKIMDAYIZ":"UNDER MAINTENANCE",
+    "Şu anda bakım modundayız; komutlar geçici olarak kapalı.":"Commands are temporarily disabled while maintenance is active.",
+    "SUNUCUYA KATILMAN GEREKİYOR":"SERVER MEMBERSHIP REQUIRED",
+    "Katre Bot komutlarını kullanabilmek için önce hedef sunucuya katılmalısın.":"You must join the required server before using Katre Bot commands.",
+    "DİL AYARLANDI":"LANGUAGE SET", "Dil değiştirildi.":"Language changed.",
+    "BOT İSTATİSTİKLERİ":"BOT STATISTICS", "Sunucu":"Server", "Kullanıcı":"Users", "Komut":"Commands", "Çalışma süresi":"Uptime",
+    "Destek Sunucusu":"Support Server", "Botu Ekle":"Add Bot", "Ana Menü":"Home", "Önceki":"Previous", "Sonraki":"Next", "Kapat":"Close",
+    "Yardım":"Help", "Dil":"Language", "Kategori seç...":"Select a category...",
+    "Önce bir dil seçmelisin.":"You must select a language first.",
+    "Sunucuya katıldıktan sonra komutu tekrar kullanabilirsin.":"After joining the server, run the command again.",
+    "ÜYE YASAKLANDI":"MEMBER BANNED", "ÜYE ATILDI":"MEMBER KICKED", "UYARI":"WARNING", "BAŞARILI":"SUCCESS", "HATA":"ERROR",
+    "AYARLAR":"SETTINGS", "DURUM":"STATUS", "AÇIK":"ENABLED", "KAPALI":"DISABLED", "KAYDEDİLDİ":"SAVED", "SİLİNDİ":"DELETED",
+    "KATIL":"JOIN", "AYRIL":"LEAVE", "ÜSTLEN":"CLAIM", "ÇEKİLİŞ":"GIVEAWAY",
+}
+def _lang_for_sendable(sendable):
+    try:
+        u = getattr(sendable, "author", None) or getattr(sendable, "user", None)
+        if u: return user_language(u.id)
+    except Exception: pass
+    return None
+def localize_text(text, lang):
+    if not text or lang != "en": return text
+    s = str(text)
+    for tr, en in sorted(EN_COMMON.items(), key=lambda kv: len(kv[0]), reverse=True): s = s.replace(tr, en)
+    return s
+
 async def v2_text(sendable, text, eph=False):
+    text = localize_text(text, _lang_for_sendable(sendable))
     if HAS_V2:
         try:
             if eph: return await sendable.send(view=_make_lv(text), ephemeral=True)
@@ -510,11 +547,12 @@ class Panel(View):
 
 
 class LanguageSelect(Select):
-    def __init__(self):
-        super().__init__(placeholder="🌐 Select a language...", min_values=1, max_values=1,
+    def __init__(self, lang="tr"):
+        txt = LANG_TEXT.get(lang, LANG_TEXT["tr"])
+        super().__init__(placeholder=txt["language_placeholder"], min_values=1, max_values=1,
                          custom_id="katre_language_select", options=[
-                             discord.SelectOption(label="Türkçe", value="tr", emoji="🇹🇷", description="Katre Bot'u Türkçe kullan"),
-                             discord.SelectOption(label="English", value="en", emoji="🇬🇧", description="Use Katre Bot in English"),
+                             discord.SelectOption(label="Türkçe", value="tr", emoji=e("turkey"), description="Katre Bot'u Türkçe kullan"),
+                             discord.SelectOption(label="English", value="en", emoji=e("uk"), description="Use Katre Bot in English"),
                          ])
     async def callback(self, it):
         lang = self.values[0] if self.values else "tr"
@@ -542,7 +580,7 @@ def language_panel_v2(lang=None):
     con.add_item(TextDisplay("## 🌐 " + txt["language_title"]))
     _sep(con); con.add_item(TextDisplay(txt["language_body"][:3000]))
     _sep(con, False)
-    con.add_item(_row(LanguageSelect()))
+    con.add_item(_row(LanguageSelect(lang or "tr")))
     _sep(con, False); con.add_item(TextDisplay("-# Katre Bot v" + BOT_VERSION + " • Türkçe / English"))
     lv = LayoutView(timeout=None); lv.add_item(con); return lv
 
@@ -554,10 +592,13 @@ def language_done_v2(lang):
     lv = LayoutView(timeout=None); lv.add_item(con); return lv
 
 class LanguageView(View):
-    def __init__(self):
-        super().__init__(timeout=None); self.add_item(LanguageSelect())
+    def __init__(self, lang="tr"):
+        super().__init__(timeout=None); self.add_item(LanguageSelect(lang))
 
 async def rp(ctx, text, view=None):
+    lang = user_language(ctx.author.id)
+    text = localize_text(text, lang)
+    if view is not None and hasattr(view, "text"): view.text = localize_text(view.text, lang)
     if view is None: return await v2_text(ctx, text)
     try: return await ctx.send(text, view=view)
     except Exception:
@@ -668,7 +709,7 @@ def _greeting_view(text, member, accent):
     except TypeError: lv = LayoutView()
     lv.add_item(con); return lv
 
-VERSION_TAGLINE = {"6.6": "Türkçe / English dil sistemi • Components V2 dil seçimi • yerelleştirilmiş yardım ve sistem mesajları", "6.3": "Components V2 karşılama • genişletilmiş full log • ayarlanabilir mesaj şablonları", "6.0": "Çalışan ticket butonları • ticket'a git • kalıcı select panel • öncelik akışı", "5.8": "Gelişmiş ticket • select panel • öncelik • yetkili kilidi", "5.7": "Free AI API • gelişmiş butonrol sistemi • kalıcı rol panelleri", "5.6": "AI resim • Free 7/gün • Pro sınırsız • gelişmiş çekiliş yönetimi", "5.5": "Yardım menüsü düzeltmesi • avatarlı kartlar • 6 yeni komut", "5.4": "Premium kartlar • V2 ticket • yeni yardım menüsü", "5.3": "Açıklayıcı hatalar • TDK kelime oyunu", "5.2": "Duyuru sistemi • V2 yardım"}
+VERSION_TAGLINE = {"6.7": "Türkçe / English tam kullanıcı arayüzü • Nitro/custom dil emojileri • Components V2", "6.6": "Türkçe / English dil sistemi • Components V2 dil seçimi • yerelleştirilmiş yardım ve sistem mesajları", "6.3": "Components V2 karşılama • genişletilmiş full log • ayarlanabilir mesaj şablonları", "6.0": "Çalışan ticket butonları • ticket'a git • kalıcı select panel • öncelik akışı", "5.8": "Gelişmiş ticket • select panel • öncelik • yetkili kilidi", "5.7": "Free AI API • gelişmiş butonrol sistemi • kalıcı rol panelleri", "5.6": "AI resim • Free 7/gün • Pro sınırsız • gelişmiş çekiliş yönetimi", "5.5": "Yardım menüsü düzeltmesi • avatarlı kartlar • 6 yeni komut", "5.4": "Premium kartlar • V2 ticket • yeni yardım menüsü", "5.3": "Açıklayıcı hatalar • TDK kelime oyunu", "5.2": "Duyuru sistemi • V2 yardım"}
 def update_text(ver, prev=None):
     L = [e("party") + " **KATRE v" + ver + " YAYINDA!**", DIV, e("spark") + " " + VERSION_TAGLINE.get(ver, "Yeni sürüm yayında")]
     ns = CHANGELOG.get(ver, [])
@@ -2008,7 +2049,7 @@ class KatreBot(commands.Bot):
             if V2_OK:
                 try: return await ctx.send(view=language_panel_v2("tr"))
                 except Exception: pass
-            return await ctx.send(LANG_TEXT["tr"]["no_language"], view=LanguageView())
+            return await ctx.send(LANG_TEXT["tr"]["no_language"], view=LanguageView("tr"))
         if isinstance(er, RequiredGuildMember):
             await send_required_guild_warning(ctx.channel, ctx.author.id); return
         if isinstance(er, ProOnly):
@@ -2306,7 +2347,7 @@ async def language(ctx):
         try:
             await ctx.send(view=language_panel_v2(lang)); return
         except Exception: traceback.print_exc()
-    await ctx.send(LANG_TEXT[lang]["language_current"] + "\n\n🇹🇷 Türkçe\n🇬🇧 English", view=LanguageView())
+    await ctx.send(LANG_TEXT[lang]["language_current"] + "\n\n" + e("turkey") + " Türkçe\n" + e("uk") + " English", view=LanguageView(lang))
 
 @kategori("genel")
 @bot.command(name="yardım", aliases=["yardim","help","komutlar"], help="Yardım menüsü")
