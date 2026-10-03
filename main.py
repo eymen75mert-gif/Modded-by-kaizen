@@ -50,8 +50,13 @@ BACKUP_CH = int(os.getenv("BACKUP_CHANNEL_ID", "0"))
 MARKER = "#KATRE_YEDEK"
 DIV = "──────────────────────────────"
 PAGE_SIZE = 15
-BOT_VERSION = "6.5"
+BOT_VERSION = "6.6"
 CHANGELOG = {
+    "6.6": [
+        "🌐 Türkçe/English kullanıcı dil sistemi eklendi; ilk kullanımda Components V2 Select Menu ile dil seçilir.",
+        "🔁 `k!language` / `k!dil` / `k!diller` ile dil her zaman değiştirilebilir.",
+        "🎛️ Dil seçimine göre yardım merkezi, sistem mesajları ve buton/menü etiketleri yerelleştirildi.",
+    ],
     "6.5": [
         "📣 Reklam / zorunlu sunucu sistemi eklendi: Owner panelinden tamamen butonlarla açılıp kapatılabilir.",
         "🔐 Belirlenen sunucuya katılmayan kullanıcılar komutları kullanamaz; otomatik uyarı ve davet butonu görür.",
@@ -139,7 +144,7 @@ class DB:
         c = self.conn.cursor()
         c.executescript("""
         CREATE TABLE IF NOT EXISTS servers(guild_id INTEGER PRIMARY KEY, prefix TEXT DEFAULT 'k!', welcome_ch INTEGER, leave_ch INTEGER, auto_role INTEGER, rank_on INTEGER DEFAULT 1, joined_at TEXT, welcome_message TEXT, leave_message TEXT);
-        CREATE TABLE IF NOT EXISTS users(user_id INTEGER PRIMARY KEY, name TEXT, xp INTEGER DEFAULT 0, level INTEGER DEFAULT 1, coins INTEGER DEFAULT 0, messages INTEGER DEFAULT 0, warnings INTEGER DEFAULT 0, pro INTEGER DEFAULT 0, pro_expiry TEXT, pro_color TEXT, pro_tag TEXT, xp2 INTEGER DEFAULT 0, birthday TEXT, notes TEXT DEFAULT '[]', rep INTEGER DEFAULT 0);
+        CREATE TABLE IF NOT EXISTS users(user_id INTEGER PRIMARY KEY, name TEXT, xp INTEGER DEFAULT 0, level INTEGER DEFAULT 1, coins INTEGER DEFAULT 0, messages INTEGER DEFAULT 0, warnings INTEGER DEFAULT 0, pro INTEGER DEFAULT 0, pro_expiry TEXT, pro_color TEXT, pro_tag TEXT, xp2 INTEGER DEFAULT 0, birthday TEXT, notes TEXT DEFAULT '[]', rep INTEGER DEFAULT 0, language TEXT);
         CREATE TABLE IF NOT EXISTS owner_settings(id INTEGER PRIMARY KEY DEFAULT 1, maintenance INTEGER DEFAULT 0);
         CREATE TABLE IF NOT EXISTS required_guild(id INTEGER PRIMARY KEY DEFAULT 1, enabled INTEGER DEFAULT 0, guild_id INTEGER DEFAULT 0, invite_url TEXT DEFAULT '', message TEXT DEFAULT '💧 Katre Bot komutlarını kullanabilmek için aşağıdaki sunucuya katılmalısın.');
         CREATE TABLE IF NOT EXISTS bot_meta(key TEXT PRIMARY KEY, value TEXT);
@@ -173,7 +178,7 @@ class DB:
         CREATE TABLE IF NOT EXISTS wordgame(guild_id INTEGER PRIMARY KEY, channel_id INTEGER, last_word TEXT, last_user INTEGER, streak INTEGER DEFAULT 0);
         INSERT OR IGNORE INTO owner_settings(id) VALUES (1);
         INSERT OR IGNORE INTO required_guild(id,enabled,guild_id,invite_url,message) VALUES (1,0,0,'','💧 Katre Bot komutlarını kullanabilmek için aşağıdaki sunucuya katılmalısın.');""")
-        for t, col, ty in (("servers","leave_ch","INTEGER"),("servers","welcome_message","TEXT"),("servers","leave_message","TEXT"),("users","pro_tag","TEXT"),("users","xp2","INTEGER DEFAULT 0"),("tickets","claimed_by","INTEGER"),("afk","mentions","INTEGER DEFAULT 0"),("tickets","subject","TEXT"),("tickets","category","TEXT"),("tickets","created_at","TEXT"),("tickets","number","INTEGER"),("tickets","description","TEXT"),("tickets","priority","TEXT DEFAULT 'normal'"),("role_menus","channel_id","INTEGER"),("role_menus","message_id","INTEGER"),("role_menus","title","TEXT")):
+        for t, col, ty in (("servers","leave_ch","INTEGER"),("servers","welcome_message","TEXT"),("servers","leave_message","TEXT"),("users","pro_tag","TEXT"),("users","xp2","INTEGER DEFAULT 0"),("tickets","claimed_by","INTEGER"),("afk","mentions","INTEGER DEFAULT 0"),("tickets","subject","TEXT"),("tickets","category","TEXT"),("tickets","created_at","TEXT"),("tickets","number","INTEGER"),("tickets","description","TEXT"),("tickets","priority","TEXT DEFAULT 'normal'"),("role_menus","channel_id","INTEGER"),("role_menus","message_id","INTEGER"),("role_menus","title","TEXT"),("users","language","TEXT")):
             try: c.execute("ALTER TABLE " + t + " ADD COLUMN " + col + " " + ty)
             except sqlite3.OperationalError: pass
         self.conn.commit()
@@ -184,7 +189,60 @@ class DB:
     def all(self, sql, p=()): return [dict(r) for r in self.q(sql, p).fetchall()]
 
 db = DB(DB_PATH)
-def ensure_user(u, n): db.q("INSERT OR IGNORE INTO users(user_id,name) VALUES(?,?)", (u, n))
+def ensure_user(u, n):
+    db.q("INSERT OR IGNORE INTO users(user_id,name) VALUES(?,?)", (u, n))
+
+LANGS = {
+    "tr": {"name":"Türkçe", "flag":"🇹🇷"},
+    "en": {"name":"English", "flag":"🇬🇧"},
+}
+
+LANG_TEXT = {
+    "tr": {
+        "language_title":"DİL SEÇİMİ", "language_body":"Katre Bot'u kullanmaya başlamadan önce dilini seç.",
+        "language_placeholder":"🌐 Dil seç...", "language_selected":"DİL AYARLANDI",
+        "language_selected_body":"Katre Bot dili **Türkçe** olarak ayarlandı.", "language_changed":"Dil değiştirildi.",
+        "language_current":"Mevcut dil: **Türkçe** 🇹🇷", "language_hint":"Dili daha sonra `k!language` komutuyla değiştirebilirsin.",
+        "help":"Yardım", "previous":"Önceki", "next":"Sonraki", "home":"Ana Menü", "stats":"İstatistik", "close":"Kapat",
+        "support":"Destek Sunucusu", "invite":"Botu Ekle", "category":"📂 Kategori seç...",
+        "no_language":"Önce bir dil seçmelisin.", "not_found":"KOMUT BULUNAMADI",
+        "not_found_body":"Böyle bir komut yok.", "help_command":"Tüm komutları görmek için",
+        "maintenance":"BAKIMDAYIZ", "maintenance_body":"Şu anda bakım modundayız; komutlar geçici olarak kapalı.",
+        "required":"SUNUCUYA KATILMAN GEREKİYOR", "required_body":"Katre Bot komutlarını kullanabilmek için önce hedef sunucuya katılmalısın.",
+        "language_button":"Dil",
+    },
+    "en": {
+        "language_title":"LANGUAGE SELECTION", "language_body":"Choose your language before using Katre Bot.",
+        "language_placeholder":"🌐 Select a language...", "language_selected":"LANGUAGE SET",
+        "language_selected_body":"Katre Bot language is now set to **English**.", "language_changed":"Language changed.",
+        "language_current":"Current language: **English** 🇬🇧", "language_hint":"You can change it later with `k!language`.",
+        "help":"Help", "previous":"Previous", "next":"Next", "home":"Home", "stats":"Statistics", "close":"Close",
+        "support":"Support Server", "invite":"Add Bot", "category":"📂 Select a category...",
+        "no_language":"You must select a language first.", "not_found":"COMMAND NOT FOUND",
+        "not_found_body":"That command does not exist.", "help_command":"For all commands, use",
+        "maintenance":"UNDER MAINTENANCE", "maintenance_body":"Commands are temporarily disabled while maintenance is active.",
+        "required":"SERVER MEMBERSHIP REQUIRED", "required_body":"You must join the required server before using Katre Bot commands.",
+        "language_button":"Language",
+    },
+}
+
+def get_user_language(user_id):
+    try:
+        r = db.one("SELECT language FROM users WHERE user_id=?", (int(user_id),))
+        return r.get("language") if r and r.get("language") in LANGS else None
+    except Exception:
+        return None
+
+def user_language(user_id):
+    return get_user_language(user_id) or "tr"
+
+def set_user_language(user_id, lang):
+    lang = lang if lang in LANGS else "tr"
+    db.q("INSERT INTO users(user_id,language) VALUES(?,?) ON CONFLICT(user_id) DO UPDATE SET language=?", (int(user_id), lang, lang))
+
+def LT(user_id, key):
+    return LANG_TEXT.get(user_language(user_id), LANG_TEXT["tr"]).get(key, LANG_TEXT["tr"].get(key, key))
+
 def ensure_server(g): db.q("INSERT OR IGNORE INTO servers(guild_id) VALUES(?)", (g,))
 def pro_log(u, a, d=0, b=0): db.q("INSERT INTO pro_logs(user_id,action,days,by_id,ts) VALUES(?,?,?,?,?)", (u, a, d, b, datetime.datetime.now().isoformat()))
 def punish_log(g, u, t, r, b, d=None): db.q("INSERT INTO punishments(guild_id,user_id,type,reason,by_id,ts,duration) VALUES(?,?,?,?,?,?,?)", (g, u, t, r, b, datetime.datetime.now().isoformat(), d))
@@ -450,6 +508,55 @@ class Panel(View):
     def btn_url(self, label, url, emoji=None, row=None):
         b = Button(label=label[:80], style=discord.ButtonStyle.link, url=url, emoji=emoji, row=row); self.add_item(b); return b
 
+
+class LanguageSelect(Select):
+    def __init__(self):
+        super().__init__(placeholder="🌐 Select a language...", min_values=1, max_values=1,
+                         custom_id="katre_language_select", options=[
+                             discord.SelectOption(label="Türkçe", value="tr", emoji="🇹🇷", description="Katre Bot'u Türkçe kullan"),
+                             discord.SelectOption(label="English", value="en", emoji="🇬🇧", description="Use Katre Bot in English"),
+                         ])
+    async def callback(self, it):
+        lang = self.values[0] if self.values else "tr"
+        set_user_language(it.user.id, lang)
+        await language_selection_response(it, lang)
+
+async def language_selection_response(it, lang):
+    txt = LANG_TEXT[lang]
+    body = "## " + txt["language_selected"] + "\n\n" + txt["language_selected_body"] + "\n\n" + txt["language_hint"]
+    if HAS_V2:
+        try:
+            await it.response.edit_message(view=language_done_v2(lang))
+            return
+        except Exception:
+            pass
+    try:
+        await it.response.edit_message(content=body, view=None)
+    except Exception:
+        try: await it.response.send_message(body, ephemeral=True)
+        except Exception: pass
+
+def language_panel_v2(lang=None):
+    lang = lang or "tr"; txt = LANG_TEXT[lang]
+    con = _new_con(0x5865F2)
+    con.add_item(TextDisplay("## 🌐 " + txt["language_title"]))
+    _sep(con); con.add_item(TextDisplay(txt["language_body"][:3000]))
+    _sep(con, False)
+    con.add_item(_row(LanguageSelect()))
+    _sep(con, False); con.add_item(TextDisplay("-# Katre Bot v" + BOT_VERSION + " • Türkçe / English"))
+    lv = LayoutView(timeout=None); lv.add_item(con); return lv
+
+def language_done_v2(lang):
+    txt = LANG_TEXT[lang]; con = _new_con(0x57F287)
+    con.add_item(TextDisplay("## " + txt["language_selected"]))
+    _sep(con); con.add_item(TextDisplay(txt["language_selected_body"] + "\n\n" + txt["language_hint"]))
+    _sep(con, False); con.add_item(TextDisplay("-# Katre Bot v" + BOT_VERSION))
+    lv = LayoutView(timeout=None); lv.add_item(con); return lv
+
+class LanguageView(View):
+    def __init__(self):
+        super().__init__(timeout=None); self.add_item(LanguageSelect())
+
 async def rp(ctx, text, view=None):
     if view is None: return await v2_text(ctx, text)
     try: return await ctx.send(text, view=view)
@@ -561,7 +668,7 @@ def _greeting_view(text, member, accent):
     except TypeError: lv = LayoutView()
     lv.add_item(con); return lv
 
-VERSION_TAGLINE = {"6.3": "Components V2 karşılama • genişletilmiş full log • ayarlanabilir mesaj şablonları", "6.0": "Çalışan ticket butonları • ticket'a git • kalıcı select panel • öncelik akışı", "5.8": "Gelişmiş ticket • select panel • öncelik • yetkili kilidi", "5.7": "Free AI API • gelişmiş butonrol sistemi • kalıcı rol panelleri", "5.6": "AI resim • Free 7/gün • Pro sınırsız • gelişmiş çekiliş yönetimi", "5.5": "Yardım menüsü düzeltmesi • avatarlı kartlar • 6 yeni komut", "5.4": "Premium kartlar • V2 ticket • yeni yardım menüsü", "5.3": "Açıklayıcı hatalar • TDK kelime oyunu", "5.2": "Duyuru sistemi • V2 yardım"}
+VERSION_TAGLINE = {"6.6": "Türkçe / English dil sistemi • Components V2 dil seçimi • yerelleştirilmiş yardım ve sistem mesajları", "6.3": "Components V2 karşılama • genişletilmiş full log • ayarlanabilir mesaj şablonları", "6.0": "Çalışan ticket butonları • ticket'a git • kalıcı select panel • öncelik akışı", "5.8": "Gelişmiş ticket • select panel • öncelik • yetkili kilidi", "5.7": "Free AI API • gelişmiş butonrol sistemi • kalıcı rol panelleri", "5.6": "AI resim • Free 7/gün • Pro sınırsız • gelişmiş çekiliş yönetimi", "5.5": "Yardım menüsü düzeltmesi • avatarlı kartlar • 6 yeni komut", "5.4": "Premium kartlar • V2 ticket • yeni yardım menüsü", "5.3": "Açıklayıcı hatalar • TDK kelime oyunu", "5.2": "Duyuru sistemi • V2 yardım"}
 def update_text(ver, prev=None):
     L = [e("party") + " **KATRE v" + ver + " YAYINDA!**", DIV, e("spark") + " " + VERSION_TAGLINE.get(ver, "Yeni sürüm yayında")]
     ns = CHANGELOG.get(ver, [])
@@ -606,6 +713,7 @@ async def check_update(bot):
 class OwnerOnly(commands.CheckFailure): pass
 class ProOnly(commands.CheckFailure): pass
 class RequiredGuildMember(commands.CheckFailure): pass
+class LanguageNotSelected(commands.CheckFailure): pass
 
 AI_IMAGE_LOCK = asyncio.Lock()
 
@@ -773,22 +881,30 @@ HELP_TIPS = ["`k!günlük` ile her gün ücretsiz coin topla.", "`k!rank` ile se
     "`k!afk <sebep>` yazınca seni etiketleyenlere sebebi gösteririm.", "`k!oylama soru | seçenek1 | seçenek2` ile hızlı anket aç.", "`k!hesapla 12*(3+4)` ile hızlı hesap yap.",
     "`k!komutbilgi <komut>` ile bir komutun kullanımını öğren.", "`k!çekiliş` ile butonlu çekiliş başlatabilirsin.", "`k!kullanıcıbilgi @üye` ile üye hakkında detaylı bilgi al.",
     "`k!sarıl @üye` ile birine sıcak bir sarılma gönder.", "`k!butonrol` ile rol butonları oluştur. `k!destek` ile ticket panelini aç."]
-def help_content(bot):
-    L = ["## " + e("logo") + " " + bot.user.name.upper() + " • YARDIM MERKEZİ", DIV,
-         "Selam! Ben **" + bot.user.name + "** " + e("spark") + " — moderasyon, ekonomi, eğlence, ticket ve çok daha fazlası tek botta.", "",
-         e("chart") + " **" + str(len(bot.commands)) + "** komut  •  " + e("genel") + " **" + str(len(bot.guilds)) + "** sunucu  •  " + e("tag") + " önek `k!`", "",
-         e("star") + " **KATEGORİLER**"]
-    for k in CATS: L += [e(k) + " **" + CATS[k][1] + "** `" + str(cat_count(bot, k)) + "`", "-# " + CAT_DESC[k]]
-    L += ["", e("spark") + " **İpucu:** " + random.choice(HELP_TIPS), "", "-# " + e("arrow") + " Menüden bir kategori seç  •  Detay: `k!komutbilgi <komut>`", e("link") + " Destek: " + SUPPORT_URL]
+def help_content(bot, lang="tr"):
+    tr = LANG_TEXT.get(lang, LANG_TEXT["tr"])
+    L = ["## " + e("logo") + " " + bot.user.name.upper() + " • " + ("HELP CENTER" if lang == "en" else "YARDIM MERKEZİ"), DIV,
+         (("Hi! I'm **" + bot.user.name + "** " + e("spark") + " — moderation, economy, fun, tickets and much more in one bot.") if lang == "en" else ("Selam! Ben **" + bot.user.name + "** " + e("spark") + " — moderasyon, ekonomi, eğlence, ticket ve çok daha fazlası tek botta.")), "",
+         e("chart") + " **" + str(len(bot.commands)) + "** " + ("commands" if lang == "en" else "komut") + "  •  " + e("genel") + " **" + str(len(bot.guilds)) + "** " + ("servers" if lang == "en" else "sunucu") + "  •  " + e("tag") + " prefix `k!`", "",
+         e("star") + " **" + ("CATEGORIES" if lang == "en" else "KATEGORİLER") + "**"]
+    for k in CATS:
+        names = {"genel":"General","mod":"Moderation & Security","sys":"Applications & Automation","eco":"Economy","fun":"Entertainment","give":"Giveaways","pro":"Pro","owner":"Owner"} if lang == "en" else {kk:CATS[kk][1] for kk in CATS}
+        descs = {"genel":"Rank, profile, avatar, snipe, AFK, rooms","mod":"Ban, kick, unban, mute, warnings, protection, role panels","sys":"Applications, tickets, temp voice, word game, logs","eco":"Coins, daily, work, fishing, mining, shop","fun":"Quiz, slots, love, polls and games","give":"Button giveaways, reroll and result panels","pro":"Pro rooms, roles, bonuses, banner and luck","owner":"Owner + Half Owner panel and announcements"} if lang == "en" else CAT_DESC
+        L += [e(k) + " **" + names[k] + "** `" + str(cat_count(bot, k)) + "`", "-# " + descs[k]]
+    tiptext = random.choice(HELP_TIPS)
+    if lang == "en": tiptext = "Use `k!language` anytime to change your language."
+    L += ["", e("spark") + " **" + ("Tip:" if lang == "en" else "İpucu:") + "** " + tiptext, "", "-# " + e("arrow") + " " + ("Select a category from the menu" if lang == "en" else "Menüden bir kategori seç") + " • " + ("Details:" if lang == "en" else "Detay:") + " `k!komutbilgi <komut>`", e("link") + " " + ("Support:" if lang == "en" else "Destek:") + " " + SUPPORT_URL]
     return "\n".join(L)
-def cat_content(bot, key, page=1):
+def cat_content(bot, key, page=1, lang="tr"):
     cmds = sorted([c for c in bot.commands if getattr(c, "kategori", None) == key], key=lambda x: x.name)
     pages = [cmds[i:i+PAGE_SIZE] for i in range(0, len(cmds), PAGE_SIZE)] or [[]]
     page = max(1, min(page, len(pages)))
-    base = ["## " + e(key) + " " + CATS[key][1].upper(), "-# " + CAT_DESC[key], DIV, "**" + str(len(cmds)) + "** komut  •  **Sayfa " + str(page) + "/" + str(len(pages)) + "**", ""]
+    names = {"genel":"General","mod":"Moderation & Security","sys":"Applications & Automation","eco":"Economy","fun":"Entertainment","give":"Giveaways","pro":"Pro","owner":"Owner"} if lang == "en" else {kk:CATS[kk][1] for kk in CATS}
+    descs = {"genel":"Rank, profile, avatar, snipe, AFK, rooms","mod":"Ban, kick, unban, mute, warnings, protection, role panels","sys":"Applications, tickets, temp voice, word game, logs","eco":"Coins, daily, work, fishing, mining, shop","fun":"Quiz, slots, love, polls and games","give":"Button giveaways, reroll and result panels","pro":"Pro rooms, roles, bonuses, banner and luck","owner":"Owner + Half Owner panel and announcements"} if lang == "en" else CAT_DESC
+    base = ["## " + e(key) + " " + names[key].upper(), "-# " + descs[key], DIV, "**" + str(len(cmds)) + "** " + ("commands" if lang == "en" else "komut") + "  •  **" + ("Page" if lang == "en" else "Sayfa") + " " + str(page) + "/" + str(len(pages)), ""]
     body = "\n".join(base + [e("arrow") + " `k!" + c.name + "` ─ " + (c.help or "") for c in pages[page-1]])
     if len(body) > 1900: body = "\n".join(base + ["`k!" + c.name + "`" for c in pages[page-1]])
-    return (body + "\n\n-# " + e("info") + " ◀ ▶ ile sayfa değiştir • " + e("home") + " ana menüye dön")[:1990]
+    return (body + "\n\n-# " + e("info") + " ◀ ▶ " + ("change page" if lang == "en" else "ile sayfa değiştir") + " • " + e("home") + " " + ("return home" if lang == "en" else "ana menüye dön"))[:1990]
 
 # ─────────────── 🧩 V2 YARDIM KARTI ───────────────
 async def _pg2(bot, it, d):
@@ -798,19 +914,20 @@ async def _pg2(bot, it, d):
             if "## " + e(k) + " " + CATS[k][1].upper() in txt: key = k; break
         if not key: return await sendv_eph(it, WN("ÖNCE KATEGORİ SEÇ", "Sayfa değiştirmek için önce menüden bir kategori seçmelisin."))
         mm = re.search(r"Sayfa (\d+)/(\d+)", txt); p = int(mm.group(1)) if mm else 1
-        await it.response.edit_message(view=help_v2(bot, cat_content(bot, key, p + d)))
+        await it.response.edit_message(view=help_v2(bot, cat_content(bot, key, p + d, user_language(it.user.id)), user_language(it.user.id)))
     except Exception as ex:
         await sendv_eph(it, ER("SAYFA HATASI", str(ex)[:200]))
 
 def _help_accent(title):
     for k in CATS:
         if e(k) in title and CATS[k][1].upper() in title: return HELP_COLORS.get(k, 0x5865F2)
-    if "YARDIM MERKEZİ" in title: return 0x5865F2
+    if "YARDIM MERKEZİ" in title or "HELP CENTER" in title: return 0x5865F2
     return _accent(title)
 
-def help_v2(bot, text):
+def help_v2(bot, text, lang="tr"):
     title, rest = _card_parts(text)
-    home = "YARDIM MERKEZİ" in title
+    lt = LANG_TEXT.get(lang, LANG_TEXT["tr"])
+    home = ("YARDIM MERKEZİ" in title or "HELP CENTER" in title)
     heading = title if title.startswith("#") else "## " + title.replace("**", "")
     con = _new_con(_help_accent(title))
     item = None
@@ -823,14 +940,16 @@ def help_v2(bot, text):
     cur = None
     for k in CATS:
         if e(k) in title and CATS[k][1].upper() in title: cur = k; break
-    sel = Select(placeholder="📂 Kategori seç...", min_values=1, max_values=1, custom_id="kv_sel",
-                 options=[discord.SelectOption(label=CATS[k][1], value=k, emoji=SLOTS.get(k, "•"), description=CAT_DESC[k][:90], default=(k == cur)) for k in CATS])
+    cat_names = {"genel":"General","mod":"Moderation & Security","sys":"Applications & Automation","eco":"Economy","fun":"Entertainment","give":"Giveaways","pro":"Pro","owner":"Owner"} if lang == "en" else {kk:CATS[kk][1] for kk in CATS}
+    cat_descs = {"genel":"General commands","mod":"Moderation and security","sys":"Automation and tickets","eco":"Economy commands","fun":"Fun and games","give":"Giveaways","pro":"Pro features","owner":"Owner tools"} if lang == "en" else CAT_DESC
+    sel = Select(placeholder=lt["category"], min_values=1, max_values=1, custom_id="kv_sel",
+                 options=[discord.SelectOption(label=cat_names[k], value=k, emoji=SLOTS.get(k, "•"), description=cat_descs[k][:90], default=(k == cur)) for k in CATS])
     async def sel_cb(it):
         try:
             key = sel.values[0]
             if key == "owner" and it.user.id != OWNER_ID and not is_half_owner(it.user.id):
                 return await sendv_eph(it, ER("YETKİ YOK", "Owner kategorisi sadece bot sahibine ve yardımcılarına açık."))
-            await it.response.edit_message(view=help_v2(bot, cat_content(bot, key, 1)))
+            await it.response.edit_message(view=help_v2(bot, cat_content(bot, key, 1, user_language(it.user.id)), user_language(it.user.id)))
         except Exception as ex:
             traceback.print_exc()
             try: await sendv_eph(it, ER("MENÜ HATASI", "Kategori açılamadı.\n`" + str(ex)[:150] + "`"))
@@ -839,22 +958,22 @@ def help_v2(bot, text):
     _sep(con, False); con.add_item(_row(sel))
     async def prev(it): await _pg2(bot, it, -1)
     async def nxt(it): await _pg2(bot, it, 1)
-    async def home_cb(it): await it.response.edit_message(view=help_v2(bot, help_content(bot)))
+    async def home_cb(it): await it.response.edit_message(view=help_v2(bot, help_content(bot, user_language(it.user.id)), user_language(it.user.id)))
     async def stats(it):
         up = str(datetime.datetime.now() - bot.start_time).split(".")[0]
-        await sendv_eph(it, head("chart", "BOT İSTATİSTİKLERİ") + "\n\n" + KV([(e("dot")+"Sunucu", len(bot.guilds)), (e("dot")+"Kullanıcı", sum(g.member_count or 0 for g in bot.guilds)), (e("dot")+"Komut", len(bot.commands)), (e("dot")+"Çalışma süresi", up), (e("dot")+"Ping", str(round(bot.latency*1000))+" ms")]))
+        await sendv_eph(it, head("chart", "STATISTICS" if user_language(it.user.id) == "en" else "BOT İSTATİSTİKLERİ") + "\n\n" + KV([(e("dot")+("Servers" if user_language(it.user.id) == "en" else "Sunucu"), len(bot.guilds)), (e("dot")+("Users" if user_language(it.user.id) == "en" else "Kullanıcı"), sum(g.member_count or 0 for g in bot.guilds)), (e("dot")+("Commands" if user_language(it.user.id) == "en" else "Komut"), len(bot.commands)), (e("dot")+("Uptime" if user_language(it.user.id) == "en" else "Çalışma süresi"), up), (e("dot")+"Ping", str(round(bot.latency*1000))+" ms")]))
     async def close(it): await it.message.delete()
     con.add_item(_row(
-        mkbtn("Önceki", prev, discord.ButtonStyle.secondary, "◀", "kv_prev"),
-        mkbtn("Sonraki", nxt, discord.ButtonStyle.secondary, "▶", "kv_next"),
-        mkbtn("Ana Menü", home_cb, discord.ButtonStyle.success, SLOTS["home"], "kv_home"),
-        mkbtn("İstatistik", stats, discord.ButtonStyle.secondary, SLOTS["chart"], "kv_stats"),
-        mkbtn("Kapat", close, discord.ButtonStyle.danger, SLOTS["trash"], "kv_close")))
+        mkbtn(lt["previous"], prev, discord.ButtonStyle.secondary, "◀", "kv_prev"),
+        mkbtn(lt["next"], nxt, discord.ButtonStyle.secondary, "▶", "kv_next"),
+        mkbtn(lt["home"], home_cb, discord.ButtonStyle.success, SLOTS["home"], "kv_home"),
+        mkbtn(lt["stats"], stats, discord.ButtonStyle.secondary, SLOTS["chart"], "kv_stats"),
+        mkbtn(lt["close"], close, discord.ButtonStyle.danger, SLOTS["trash"], "kv_close")))
     try:
         inv = "https://discord.com/oauth2/authorize?client_id=" + str(bot.user.id) + "&permissions=8&scope=bot%20applications.commands"
-        con.add_item(_row(mkbtn("Destek Sunucusu", url=SUPPORT_URL, emoji=e("link")), mkbtn("Botu Ekle", url=inv, emoji="➕")))
+        con.add_item(_row(mkbtn(lt["support"], url=SUPPORT_URL, emoji=e("link")), mkbtn(lt["invite"], url=inv, emoji="➕")))
     except Exception: pass
-    _sep(con, False); con.add_item(TextDisplay("-# " + e("logo") + " Katre Bot v" + BOT_VERSION + " • `k!komutbilgi <komut>` ile detay"))
+    _sep(con, False); con.add_item(TextDisplay("-# " + e("logo") + " Katre Bot v" + BOT_VERSION + " • `k!komutbilgi <komut>` " + ("for command details" if lang == "en" else "ile detay")))
     lv = LayoutView(timeout=None); lv.add_item(con)
     return lv
 
@@ -1446,9 +1565,9 @@ class KatreBot(commands.Bot):
         return list(prefixes)
     async def setup_hook(self):
         self.gwv = GiveawayPanel(self, " ")
-        for v in (self.gwv, TicketOpenView(), TicketActionView(), AppOpenPanel(" "), HelpPanel(self, " "), OwnerPanel(self, " "), ReklamPanel()): self.add_view(v)
+        for v in (self.gwv, TicketOpenView(), TicketActionView(), AppOpenPanel(" "), HelpPanel(self, " "), OwnerPanel(self, " "), ReklamPanel(), LanguageView()): self.add_view(v)
         if V2_OK:
-            for mk in (lambda: help_v2(self, " "),):
+            for mk in (lambda: help_v2(self, " "), lambda: language_panel_v2("tr")):
                 try: self.add_view(mk())
                 except Exception: traceback.print_exc()
         self.status_loop.start(); self.gw_checker.start(); self.pro_checker.start(); self.backup_loop.start(); self.stats_loop.start()
@@ -1638,16 +1757,30 @@ class KatreBot(commands.Bot):
                     nw = datetime.datetime.now().timestamp()
                     if nw - MAINT_CD.get(m.author.id, 0) > 30:
                         MAINT_CD[m.author.id] = nw
-                        try: await rp_ch(m.channel, head("warn", "BAKIMDAYIZ") + "\n\nŞu anda bakım modundayız; komutlar geçici olarak kapalı.")
+                        try: await rp_ch(m.channel, head("warn", LT(m.author.id, "maintenance")) + "\n\n" + LT(m.author.id, "maintenance_body"))
                         except Exception: pass
                 return
             if db.one("SELECT 1 FROM blacklist WHERE user_id=?", (m.author.id,)): return
+            if is_command_message and get_user_language(m.author.id) is None:
+                # language/dil/diller komutu seçimsiz kullanıcıyı da dil ekranına götürür.
+                raw_cmd = (m.content or "").split()[0].lower() if m.content else ""
+                command_token = raw_cmd
+                for pp in prefs:
+                    if command_token.startswith(str(pp).lower()):
+                        command_token = command_token[len(str(pp)):].lower()
+                        break
+                if command_token not in {"language", "dil", "diller"}:
+                    try:
+                        if V2_OK: await m.channel.send(view=language_panel_v2("tr"))
+                        else: await m.channel.send(LANG_TEXT["tr"]["no_language"], view=LanguageView())
+                    except Exception: pass
+                    return
             if is_command_message and m.author.id != OWNER_ID and not await required_guild_member(m.author.id):
                 blocked_by_required_server = True
                 nw = time.time()
                 if nw - REQUIRED_WARN_CD.get(m.author.id, 0) > 20:
                     REQUIRED_WARN_CD[m.author.id] = nw
-                    try: await send_required_guild_warning(m.channel)
+                    try: await send_required_guild_warning(m.channel, m.author.id)
                     except Exception: pass
                 return
         except Exception: pass
@@ -1871,14 +2004,19 @@ class KatreBot(commands.Bot):
             await guild_log_send(ctx.guild, head("terminal", "KOMUT KULLANILDI") + "\n\nKullanıcı: " + ctx.author.mention + " • ID: `" + str(ctx.author.id) + "`\nKanal: " + ctx.channel.mention + "\nKomut: `" + ctx.message.content[:500].replace("`", "ˋ") + "`", "command")
     async def on_command_error(self, ctx, er):
         if isinstance(er, OwnerOnly): return
+        if isinstance(er, LanguageNotSelected):
+            if V2_OK:
+                try: return await ctx.send(view=language_panel_v2("tr"))
+                except Exception: pass
+            return await ctx.send(LANG_TEXT["tr"]["no_language"], view=LanguageView())
         if isinstance(er, RequiredGuildMember):
-            await send_required_guild_warning(ctx.channel); return
+            await send_required_guild_warning(ctx.channel, ctx.author.id); return
         if isinstance(er, ProOnly):
             v = Panel(head("pro", "PRO GEREKLİ") + "\n\nBu komut sadece PRO üyelere özel.\n📋 `k!pro` • 💎 `k!probonus`")
             v.btn_url("Pro Destek", SUPPORT_URL, emoji=e("diamond"))
             await rp(ctx, v.text, v); return
         if isinstance(er, commands.CommandNotFound):
-            await rp(ctx, WN("KOMUT BULUNAMADI", "Böyle bir komut yok.\nTüm komutları görmek için `" + pf(ctx) + "yardım` yaz.")); return
+            await rp(ctx, WN(LT(ctx.author.id, "not_found"), LT(ctx.author.id, "not_found_body") + "\n" + LT(ctx.author.id, "help_command") + " `" + pf(ctx) + ("help`" if user_language(ctx.author.id) == "en" else "yardım`") )); return
         if isinstance(er, commands.MissingRequiredArgument):
             await rp(ctx, ER("EKSİK ARGÜMAN", "**" + arg_label(ctx.command, er.param.name) + "** bilgisi eksik.\nKullanım: `" + usage_of(ctx) + "`" + desc_line(ctx.command))); return
         if isinstance(er, commands.BadArgument):
@@ -2115,24 +2253,37 @@ async def required_guild_member(user_id):
     REQUIRED_MEMBER_CACHE[key] = (now, allowed)
     return allowed
 
-async def send_required_guild_warning(channel):
+async def send_required_guild_warning(channel, user_id=None):
     r = required_guild_settings(); gid = int(r.get("guild_id") or 0); g = bot.get_guild(gid) if gid else None
-    body = str(r.get("message") or "💧 Katre Bot komutlarını kullanabilmek için önce hedef sunucuya katılmalısın.")
+    raw_default = "💧 Katre Bot komutlarını kullanabilmek için aşağıdaki sunucuya katılmalısın."
+    configured = str(r.get("message") or "").strip()
+    body = (LT(user_id or 0, "required_body") if not configured or configured == raw_default else configured)
     if g: body += "\n\n🎯 Hedef sunucu: **" + g.name + "**"
-    body += "\n\nSunucuya katıldıktan sonra komutu tekrar kullanabilirsin."
+    body += "\n\n" + ("After joining the server, run the command again." if user_language(user_id or 0) == "en" else "Sunucuya katıldıktan sonra komutu tekrar kullanabilirsin.")
     view = Panel(" ", timeout=60)
     inv = str(r.get("invite_url") or "").strip()
-    if _valid_invite_url(inv): view.btn_url("Sunucuya Katıl", inv, emoji="🔗")
-    msg = await rp_ch(channel, WN("SUNUCUYA KATILMAN GEREKİYOR", body), view if _valid_invite_url(inv) else None)
+    if _valid_invite_url(inv): view.btn_url(("Join Server" if user_language(user_id or 0) == "en" else "Sunucuya Katıl"), inv, emoji="🔗")
+    msg = await rp_ch(channel, WN(LT(user_id or 0, "required"), body), view if _valid_invite_url(inv) else None)
     if msg:
         try: await msg.delete(delay=15)
         except Exception: pass
 
+async def language_check(ctx):
+    # Dil komutu her zaman erişilebilir; diğer komutlar ilk seçimden önce bekletilir.
+    if (ctx.command and ctx.command.name.lower() == "language") or any(str(a).lower() == "language" for a in (ctx.command.aliases if ctx.command else [])):
+        return True
+    ensure_user(ctx.author.id, str(ctx.author))
+    if get_user_language(ctx.author.id) is None:
+        raise LanguageNotSelected()
+    return True
+
 async def required_server_check(ctx):
+    if ctx.command and (ctx.command.name.lower() == "language" or any(str(a).lower() in {"language", "dil", "diller"} for a in ctx.command.aliases)): return True
     if ctx.author.id == OWNER_ID: return True
     if not await required_guild_member(ctx.author.id): raise RequiredGuildMember()
     return True
 
+bot.add_check(language_check)
 bot.add_check(required_server_check)
 
 # ═══════════════════════════════════════════════════════════════════
@@ -2148,14 +2299,25 @@ def usage_cmd(c, p="k!"):
     return p + c.name + ((" " + " ".join(ps)) if ps else "")
 
 @kategori("genel")
+@bot.command(name="language", aliases=["dil", "diller"], help="Türkçe / English dilini seç veya değiştir")
+async def language(ctx):
+    lang = user_language(ctx.author.id)
+    if V2_OK:
+        try:
+            await ctx.send(view=language_panel_v2(lang)); return
+        except Exception: traceback.print_exc()
+    await ctx.send(LANG_TEXT[lang]["language_current"] + "\n\n🇹🇷 Türkçe\n🇬🇧 English", view=LanguageView())
+
+@kategori("genel")
 @bot.command(name="yardım", aliases=["yardim","help","komutlar"], help="Yardım menüsü")
 @commands.cooldown(1, 5, commands.BucketType.user)
 async def yardim(ctx):
+    lang = user_language(ctx.author.id)
     if V2_OK:
         try:
-            await ctx.send(view=help_v2(bot, help_content(bot))); return
+            await ctx.send(view=help_v2(bot, help_content(bot, lang))); return
         except Exception: traceback.print_exc()
-    await rp(ctx, help_content(bot), HelpPanel(bot, help_content(bot)))
+    await rp(ctx, help_content(bot, lang), HelpPanel(bot, help_content(bot, lang)))
 @kategori("genel")
 @bot.command(name="komutbilgi", aliases=["cmd"], help="<komut> — detay")
 async def komutbilgi(ctx, *, name: str):
@@ -3762,12 +3924,13 @@ async def kanalbilgi(ctx, ch: discord.TextChannel = None):
 @bot.command(name="botbilgi", aliases=["about", "hakkında"], help="Bot hakkında")
 @commands.cooldown(1, 5, commands.BucketType.user)
 async def botbilgi(ctx):
+    lt = LANG_TEXT.get(user_language(ctx.author.id), LANG_TEXT["tr"])
     up = str(datetime.datetime.now() - bot.start_time).split(".")[0]
     inv = "https://discord.com/oauth2/authorize?client_id=" + str(bot.user.id) + "&permissions=8&scope=bot%20applications.commands"
     txt = (head("robot", bot.user.name.upper() + " • HAKKINDA") + "\n\nModerasyon, ekonomi, eğlence, ticket ve çekilişleri tek botta toplayan Türkçe Discord botu. 💧\n\n" + KV([(e("tag")+"Sürüm", "v" + BOT_VERSION), (e("genel")+"Sunucu", len(bot.guilds)),
            (e("dot")+"Kullanıcı", sum(g.member_count or 0 for g in bot.guilds)), (e("gear")+"Komut", len(bot.commands)), (e("alarm")+"Çalışma süresi", up), (e("bolt")+"Ping", str(round(bot.latency * 1000)) + " ms"),
            (e("robot")+"Altyapı", "discord.py " + discord.__version__ + " • Python " + ".".join(str(x) for x in sys.version_info[:3])), (e("spark")+"V2 kart", "Açık" if V2_OK else "Kapalı")]))
-    rows = [_row(mkbtn("Destek Sunucusu", url=SUPPORT_URL, emoji=e("link")), mkbtn("Botu Ekle", url=inv, emoji="➕"))] if V2_OK else []
+    rows = [_row(mkbtn(lt["support"], url=SUPPORT_URL, emoji=e("link")), mkbtn(lt["invite"], url=inv, emoji="➕"))] if V2_OK else []
     await send_thumb(ctx, txt, bot.user.display_avatar.url, accent=0x5865F2, rows=rows)
 @kategori("genel")
 @bot.command(name="ipucu", aliases=["tip", "öneri"], help="Rastgele ipucu")
