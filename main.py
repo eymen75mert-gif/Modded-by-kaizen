@@ -275,13 +275,14 @@ def _make_con(text):
     except Exception: con = Container()
     if rest and "**" in title and not title.startswith("#"):
         con.add_item(TextDisplay(title[:500]))
-    if Separator:
-        try: con.add_item(Separator(visible=True))
-        except Exception: pass
-    con.add_item(TextDisplay(rest[:3400]))
+        if Separator:
+            try: con.add_item(Separator(visible=True))
+            except Exception: pass
+        con.add_item(TextDisplay(rest[:3400]))
     else:
         con.add_item(TextDisplay((title + (("\n" + rest) if rest else ""))[:3900]))
     return con
+
 
 def _make_lv(text):
     try: lv = LayoutView(timeout=None)
