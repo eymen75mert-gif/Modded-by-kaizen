@@ -50,9 +50,9 @@ BACKUP_CH = int(os.getenv("BACKUP_CHANNEL_ID", "0"))
 MARKER = "#KATRE_YEDEK"
 DIV = "──────────────────────────────"
 PAGE_SIZE = 15
-BOT_VERSION = "6.2"
+BOT_VERSION = "6.3"
 CHANGELOG = {
-    "6.2": [
+    "6.3": [
         "📚 Full log kapsamı genişletildi: ban/unban, timeout, üye rol/nick değişimi, kanal/rol, davet, webhook, thread, emoji/sticker ve komut olayları",
         "🧪 `k!logtest`, `k!logkapat`, `k!logtemizle` ve `k!logdetay` eklendi",
         "👋 Hoş geldin/ayrılma mesajları Components V2 kartları olarak gönderiliyor",
@@ -554,7 +554,7 @@ def _greeting_view(text, member, accent):
     except TypeError: lv = LayoutView()
     lv.add_item(con); return lv
 
-VERSION_TAGLINE = {"6.2": "Components V2 karşılama • genişletilmiş full log • ayarlanabilir mesaj şablonları", "6.0": "Çalışan ticket butonları • ticket'a git • kalıcı select panel • öncelik akışı", "5.8": "Gelişmiş ticket • select panel • öncelik • yetkili kilidi", "5.7": "Free AI API • gelişmiş butonrol sistemi • kalıcı rol panelleri", "5.6": "AI resim • Free 7/gün • Pro sınırsız • gelişmiş çekiliş yönetimi", "5.5": "Yardım menüsü düzeltmesi • avatarlı kartlar • 6 yeni komut", "5.4": "Premium kartlar • V2 ticket • yeni yardım menüsü", "5.3": "Açıklayıcı hatalar • TDK kelime oyunu", "5.2": "Duyuru sistemi • V2 yardım"}
+VERSION_TAGLINE = {"6.3": "Components V2 karşılama • genişletilmiş full log • ayarlanabilir mesaj şablonları", "6.0": "Çalışan ticket butonları • ticket'a git • kalıcı select panel • öncelik akışı", "5.8": "Gelişmiş ticket • select panel • öncelik • yetkili kilidi", "5.7": "Free AI API • gelişmiş butonrol sistemi • kalıcı rol panelleri", "5.6": "AI resim • Free 7/gün • Pro sınırsız • gelişmiş çekiliş yönetimi", "5.5": "Yardım menüsü düzeltmesi • avatarlı kartlar • 6 yeni komut", "5.4": "Premium kartlar • V2 ticket • yeni yardım menüsü", "5.3": "Açıklayıcı hatalar • TDK kelime oyunu", "5.2": "Duyuru sistemi • V2 yardım"}
 def update_text(ver, prev=None):
     L = [e("party") + " **KATRE v" + ver + " YAYINDA!**", DIV, e("spark") + " " + VERSION_TAGLINE.get(ver, "Yeni sürüm yayında")]
     ns = CHANGELOG.get(ver, [])
@@ -1414,16 +1414,28 @@ async def tdk_check(word):
 MAINT_CD = {}
 class KatreBot(commands.Bot):
     def __init__(self):
-        super().__init__(command_prefix=self.get_prefix, intents=discord.Intents.all(), case_insensitive=True, help_command=None, allowed_mentions=discord.AllowedMentions(users=True, roles=False, everyone=False))
+        intents = discord.Intents.all()
+        intents.message_content = True
+        intents.guild_messages = True
+        intents.guilds = True
+        super().__init__(command_prefix=self.get_prefix, intents=intents, case_insensitive=True, help_command=None, allowed_mentions=discord.AllowedMentions(users=True, roles=False, everyone=False))
         self.start_time = datetime.datetime.now(); self.xp_cd = {}; self.ar_cd = {}; self._si = 0; self.spam = {}; self.flood = {}; self.joins = {}
     async def get_prefix(self, m):
-        p = "k!"
+        # k! daima geçerli kalsın; sunucu özel prefixi bunun üzerine ekle.
+        prefixes = {"k!", "K!"}
         if m.guild:
-            s = db.one("SELECT prefix FROM servers WHERE guild_id=?", (m.guild.id,))
-            if s: p = s["prefix"]
-        b = {p, p.lower(), p.upper()}
-        if self.user: b.add("<@" + str(self.user.id) + "> "); b.add("<@!" + str(self.user.id) + "> ")
-        return list(b)
+            try:
+                row = db.one("SELECT prefix FROM servers WHERE guild_id=?", (m.guild.id,))
+                custom = (row["prefix"] if row else "") or ""
+                custom = str(custom).strip()
+                if custom:
+                    prefixes.update({custom, custom.lower(), custom.upper()})
+            except Exception:
+                pass
+        if self.user:
+            prefixes.add("<@" + str(self.user.id) + "> ")
+            prefixes.add("<@!" + str(self.user.id) + "> ")
+        return list(prefixes)
     async def setup_hook(self):
         self.gwv = GiveawayPanel(self, " ")
         for v in (self.gwv, TicketOpenView(), TicketActionView(), AppOpenPanel(" "), HelpPanel(self, " "), OwnerPanel(self, " ")): self.add_view(v)
@@ -1610,13 +1622,14 @@ class KatreBot(commands.Bot):
     async def on_message(self, m):
         if m.author.bot: return
         try:
+            prefs = await self.get_prefix(m)
+            is_command_message = bool(m.content and any(m.content.startswith(p) for p in prefs))
             if is_maintenance() and m.author.id != OWNER_ID:
-                prefs = await self.get_prefix(m)
-                if m.content and any(m.content.startswith(p) for p in prefs):
+                if is_command_message:
                     nw = datetime.datetime.now().timestamp()
                     if nw - MAINT_CD.get(m.author.id, 0) > 30:
                         MAINT_CD[m.author.id] = nw
-                        try: await rp_ch(m.channel, head("warn", "BAKIMDAYIZ") + "\n\nBirazdan döneriz!")
+                        try: await rp_ch(m.channel, head("warn", "BAKIMDAYIZ") + "\n\nŞu anda bakım modundayız; komutlar geçici olarak kapalı.")
                         except Exception: pass
                 return
             if db.one("SELECT 1 FROM blacklist WHERE user_id=?", (m.author.id,)): return
@@ -1638,11 +1651,11 @@ class KatreBot(commands.Bot):
         except Exception: pass
         try:
             await self.protections(m)
-            if m.guild:
+            if m.guild and not is_command_message:
                 wg = db.one("SELECT * FROM wordgame WHERE guild_id=?", (m.guild.id,))
-                if wg and wg["channel_id"] == m.channel.id and not m.content.startswith(("k!", "K!")):
+                if wg and wg["channel_id"] == m.channel.id:
                     await self.word_game(m, wg)
-            if m.guild and not m.content.startswith(("k!", "K!")):
+            if m.guild and not is_command_message:
                 nw = datetime.datetime.now().timestamp()
                 if nw - self.ar_cd.get(m.guild.id, 0) > 3:
                     low = (m.content or "").lower()
@@ -3524,6 +3537,18 @@ def _calc(n):
         return _CALC_OPS[type(n.op)](a, b)
     if isinstance(n, ast.UnaryOp) and type(n.op) in _CALC_OPS: return _CALC_OPS[type(n.op)](_calc(n.operand))
     raise ValueError("Desteklenmeyen ifade")
+@kategori("genel")
+@bot.command(name="komuttest", aliases=["testkomut"], help="Komut sistemini teşhis eder")
+async def komuttest(ctx):
+    prefs = await bot.get_prefix(ctx.message)
+    p = ", ".join("`" + str(x) + "`" for x in prefs[:8])
+    await rp(ctx, OK("KOMUT SİSTEMİ ÇALIŞIYOR", "Prefixler: " + p + "\nMesaj: `" + ctx.message.content[:120].replace("`", "ˋ") + "`\nKayıtlı komut: **" + str(len(bot.commands)) + "**"))
+@kategori("genel")
+@bot.command(name="prefix", aliases=["önek", "onek"], help="Sunucu prefixini gösterir")
+async def prefix_show(ctx):
+    prefs = await bot.get_prefix(ctx.message)
+    custom = [x for x in prefs if x not in {"k!", "K!"} and not x.startswith("<@")]
+    await rp(ctx, head("gear", "PREFIX") + "\n\nVarsayılan: `k!`\nSunucu prefixi: `" + (custom[0] if custom else "k!") + "`")
 @kategori("genel")
 @bot.command(name="hesapla", aliases=["calc", "hesap"], help="<işlem> — hesap makinesi")
 @commands.cooldown(1, 2, commands.BucketType.user)
