@@ -1,5 +1,5 @@
 # ═══════════════════════════════════════════════════════════════════
-#  💧 KATRE BOT v5.9 — BÖLÜM 1/2 • GELİŞMİŞ TİCKET • SELECT PANEL • PREMIUM KART • V2 YARDIM
+#  💧 KATRE BOT v6.1 — BÖLÜM 1/2 • GELİŞMİŞ TİCKET • SELECT PANEL • PREMIUM KART • V2 YARDIM
 #  ENV: BOT_TOKEN, OWNER_ID, SUPPORT_URL, BACKUP_CHANNEL_ID, OPENAI_API_KEY, OPENAI_IMAGE_MODEL, HF_TOKEN, HF_IMAGE_MODEL, AI_PROVIDER
 #  requirements.txt: discord.py>=2.6.0, aiohttp>=3.9.0, huggingface_hub>=1.1.2
 # ═══════════════════════════════════════════════════════════════════
@@ -50,8 +50,15 @@ BACKUP_CH = int(os.getenv("BACKUP_CHANNEL_ID", "0"))
 MARKER = "#KATRE_YEDEK"
 DIV = "──────────────────────────────"
 PAGE_SIZE = 15
-BOT_VERSION = "6.0"
+BOT_VERSION = "6.1"
 CHANGELOG = {
+    "6.1": [
+        "👋 Hoş geldin ve ayrılma mesajları ayrı ayrı kanal seçilebilir hale getirildi",
+        "🎭 Select rol paneli geliştirildi; `k!rolpanel` ve `k!selectrol` ile kullanılabilir",
+        "🔁 Reaction Role sistemi eklendi: emoji ile rol verme/alma",
+        "📚 Tam log sistemi eklendi: üye, mesaj, moderasyon, rol, kanal, ses, ticket ve sunucu olayları ayrı kanallara yönlendirilebilir",
+        "⚙️ `k!logayarla` ve `k!loglar` ile log kanalları tamamen ayarlanabilir",
+    ],
     "5.9": [
         "🐛 Ticket panelindeki Components V2 `view parameter must be View not Container` hatası düzeltildi",
         "🎫 Ticket paneli artık LayoutView içinde güvenli şekilde gönderiliyor",
@@ -119,7 +126,7 @@ class DB:
         self.conn = sqlite3.connect(path, check_same_thread=False); self.conn.row_factory = sqlite3.Row
         c = self.conn.cursor()
         c.executescript("""
-        CREATE TABLE IF NOT EXISTS servers(guild_id INTEGER PRIMARY KEY, prefix TEXT DEFAULT 'k!', welcome_ch INTEGER, auto_role INTEGER, rank_on INTEGER DEFAULT 1, joined_at TEXT);
+        CREATE TABLE IF NOT EXISTS servers(guild_id INTEGER PRIMARY KEY, prefix TEXT DEFAULT 'k!', welcome_ch INTEGER, leave_ch INTEGER, auto_role INTEGER, rank_on INTEGER DEFAULT 1, joined_at TEXT);
         CREATE TABLE IF NOT EXISTS users(user_id INTEGER PRIMARY KEY, name TEXT, xp INTEGER DEFAULT 0, level INTEGER DEFAULT 1, coins INTEGER DEFAULT 0, messages INTEGER DEFAULT 0, warnings INTEGER DEFAULT 0, pro INTEGER DEFAULT 0, pro_expiry TEXT, pro_color TEXT, pro_tag TEXT, xp2 INTEGER DEFAULT 0, birthday TEXT, notes TEXT DEFAULT '[]', rep INTEGER DEFAULT 0);
         CREATE TABLE IF NOT EXISTS owner_settings(id INTEGER PRIMARY KEY DEFAULT 1, maintenance INTEGER DEFAULT 0);
         CREATE TABLE IF NOT EXISTS bot_meta(key TEXT PRIMARY KEY, value TEXT);
@@ -142,6 +149,8 @@ class DB:
         CREATE TABLE IF NOT EXISTS counters(guild_id INTEGER PRIMARY KEY, target INTEGER, channel_id INTEGER, reached INTEGER DEFAULT 0);
         CREATE TABLE IF NOT EXISTS level_roles(id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id INTEGER, level INTEGER, role_id INTEGER);
         CREATE TABLE IF NOT EXISTS guild_logs(guild_id INTEGER PRIMARY KEY, channel_id INTEGER);
+        CREATE TABLE IF NOT EXISTS log_channels(guild_id INTEGER NOT NULL, event TEXT NOT NULL, channel_id INTEGER, PRIMARY KEY(guild_id,event));
+        CREATE TABLE IF NOT EXISTS reaction_roles(message_id INTEGER NOT NULL, guild_id INTEGER NOT NULL, channel_id INTEGER NOT NULL, emoji TEXT NOT NULL, role_id INTEGER NOT NULL, PRIMARY KEY(message_id,emoji));
         CREATE TABLE IF NOT EXISTS emojis(slot TEXT PRIMARY KEY, emoji TEXT);
         CREATE TABLE IF NOT EXISTS tempvoice(guild_id INTEGER PRIMARY KEY, trigger_ch INTEGER, category_id INTEGER);
         CREATE TABLE IF NOT EXISTS temp_channels(channel_id INTEGER PRIMARY KEY, owner_id INTEGER, guild_id INTEGER);
@@ -150,7 +159,7 @@ class DB:
         CREATE TABLE IF NOT EXISTS polls(id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id INTEGER, channel_id INTEGER, message_id INTEGER DEFAULT 0, question TEXT, options TEXT, votes TEXT DEFAULT '{}', status TEXT DEFAULT 'active', creator INTEGER, ts TEXT);
         CREATE TABLE IF NOT EXISTS wordgame(guild_id INTEGER PRIMARY KEY, channel_id INTEGER, last_word TEXT, last_user INTEGER, streak INTEGER DEFAULT 0);
         INSERT OR IGNORE INTO owner_settings(id) VALUES (1);""")
-        for t, col, ty in (("users","pro_tag","TEXT"),("users","xp2","INTEGER DEFAULT 0"),("tickets","claimed_by","INTEGER"),("afk","mentions","INTEGER DEFAULT 0"),("tickets","subject","TEXT"),("tickets","category","TEXT"),("tickets","created_at","TEXT"),("tickets","number","INTEGER"),("tickets","description","TEXT"),("tickets","priority","TEXT DEFAULT 'normal'"),("role_menus","channel_id","INTEGER"),("role_menus","message_id","INTEGER"),("role_menus","title","TEXT")):
+        for t, col, ty in (("servers","leave_ch","INTEGER"),("users","pro_tag","TEXT"),("users","xp2","INTEGER DEFAULT 0"),("tickets","claimed_by","INTEGER"),("afk","mentions","INTEGER DEFAULT 0"),("tickets","subject","TEXT"),("tickets","category","TEXT"),("tickets","created_at","TEXT"),("tickets","number","INTEGER"),("tickets","description","TEXT"),("tickets","priority","TEXT DEFAULT 'normal'"),("role_menus","channel_id","INTEGER"),("role_menus","message_id","INTEGER"),("role_menus","title","TEXT")):
             try: c.execute("ALTER TABLE " + t + " ADD COLUMN " + col + " " + ty)
             except sqlite3.OperationalError: pass
         self.conn.commit()
@@ -463,15 +472,33 @@ def get_msg_text(m):
         for comp in m.components: walk(comp)
     except Exception: pass
     return "\n".join(outs) if outs else (m.content or "")
-async def guild_log_send(g, t):
-    r = db.one("SELECT channel_id FROM guild_logs WHERE guild_id=?", (g.id,))
-    if r and r["channel_id"]:
-        ch = g.get_channel(r["channel_id"])
+LOG_EVENTS = {
+    "sunucu": "server", "uye": "member", "mesaj": "message", "moderasyon": "moderation",
+    "rol": "role", "kanal": "channel", "ses": "voice", "ticket": "ticket", "koruma": "moderation", "server": "server"
+}
+LOG_LABELS = {
+    "server": "Sunucu", "member": "Üye", "message": "Mesaj", "moderation": "Moderasyon",
+    "role": "Rol", "channel": "Kanal", "voice": "Ses", "ticket": "Ticket"
+}
+async def guild_log_send(g, t, event="server"):
+    event = LOG_EVENTS.get(str(event).lower(), str(event).lower())
+    targets = []
+    r = db.one("SELECT channel_id FROM log_channels WHERE guild_id=? AND event=?", (g.id, event))
+    if r and r["channel_id"]: targets.append(r["channel_id"])
+    if event == "moderation":
+        p = db.one("SELECT log_ch FROM protections WHERE guild_id=?", (g.id,))
+        if p and p["log_ch"] and p["log_ch"] not in targets: targets.append(p["log_ch"])
+    legacy = db.one("SELECT channel_id FROM guild_logs WHERE guild_id=?", (g.id,))
+    if legacy and legacy["channel_id"] and legacy["channel_id"] not in targets: targets.append(legacy["channel_id"])
+    sent = False
+    for cid in targets:
+        ch = g.get_channel(cid)
         if ch:
-            try: await rp_ch(ch, t); return True
+            try:
+                await rp_ch(ch, t); sent = True
             except Exception: pass
-    return False
-VERSION_TAGLINE = {"6.0": "Çalışan ticket butonları • ticket'a git • kalıcı select panel • öncelik akışı", "5.8": "Gelişmiş ticket • select panel • öncelik • yetkili kilidi", "5.7": "Free AI API • gelişmiş butonrol sistemi • kalıcı rol panelleri", "5.6": "AI resim • Free 7/gün • Pro sınırsız • gelişmiş çekiliş yönetimi", "5.5": "Yardım menüsü düzeltmesi • avatarlı kartlar • 6 yeni komut", "5.4": "Premium kartlar • V2 ticket • yeni yardım menüsü", "5.3": "Açıklayıcı hatalar • TDK kelime oyunu", "5.2": "Duyuru sistemi • V2 yardım"}
+    return sent
+VERSION_TAGLINE = {"6.1": "Hoş geldin/ayrılma • Select + reaction rol • ayrıntılı ayarlanabilir log sistemi", "6.0": "Çalışan ticket butonları • ticket'a git • kalıcı select panel • öncelik akışı", "5.8": "Gelişmiş ticket • select panel • öncelik • yetkili kilidi", "5.7": "Free AI API • gelişmiş butonrol sistemi • kalıcı rol panelleri", "5.6": "AI resim • Free 7/gün • Pro sınırsız • gelişmiş çekiliş yönetimi", "5.5": "Yardım menüsü düzeltmesi • avatarlı kartlar • 6 yeni komut", "5.4": "Premium kartlar • V2 ticket • yeni yardım menüsü", "5.3": "Açıklayıcı hatalar • TDK kelime oyunu", "5.2": "Duyuru sistemi • V2 yardım"}
 def update_text(ver, prev=None):
     L = [e("party") + " **KATRE v" + ver + " YAYINDA!**", DIV, e("spark") + " " + VERSION_TAGLINE.get(ver, "Yeni sürüm yayında")]
     ns = CHANGELOG.get(ver, [])
@@ -950,37 +977,45 @@ class PollPanel(Panel):
             await sendv_eph(it, OK("ANKET KAPATILDI", "Oylama sonlandırıldı, güncel sonuçlar mesajda gösteriliyor. 📊"))
         self.btn("Anketi Kapat", close, style=discord.ButtonStyle.danger, emoji=e("lock"), cid="pollc_" + str(pid), row=1)
 
-class RoleMenuPanel(Panel):
-    def __init__(self, mid, roles, text):
-        super().__init__(text, timeout=None)
-        self.mid = str(mid)
-        for i, (rid, nm) in enumerate(roles[:25]):
-            async def cb(it, r_id=rid):
-                await it.response.defer(ephemeral=True)
-                r = it.guild.get_role(r_id)
-                if not r:
-                    return await it.followup.send(ER("ROL BULUNAMADI", "Bu rol silinmiş; yönetici `k!butonrollist` ile menüyü temizleyebilir."), ephemeral=True)
-                me = it.guild.me
-                if not me or not me.guild_permissions.manage_roles:
-                    return await it.followup.send(ER("BOT YETKİSİ EKSİK", "Botun **Rolleri Yönet** yetkisi yok."), ephemeral=True)
-                if r.is_default() or r.managed:
-                    return await it.followup.send(ER("ROL UYGUN DEĞİL", "@everyone veya Discord tarafından yönetilen bir rol butonrol olarak kullanılamaz."), ephemeral=True)
-                if r >= me.top_role:
-                    return await it.followup.send(ER("ROL HİYERARŞİSİ", "Bu rol botun en yüksek rolüyle aynı veya daha üstte. Bot rolünü yukarı taşı."), ephemeral=True)
-                try:
-                    if r in it.user.roles:
-                        await it.user.remove_roles(r, reason="Katre butonrol")
-                        msg = e("cross") + " **" + r.name + "** rolü kaldırıldı."
-                    else:
-                        await it.user.add_roles(r, reason="Katre butonrol")
-                        msg = e("check") + " **" + r.name + "** rolü verildi."
-                    await it.followup.send(head("shield", "ROL GÜNCELLENDİ") + "\n\n" + msg, ephemeral=True)
-                except discord.Forbidden:
-                    await it.followup.send(ER("ROL VERİLEMEDİ", "Discord botun bu role erişmesine izin vermedi. Bot rolünü hedef rolün üstüne taşı."), ephemeral=True)
-                except Exception as ex:
-                    await it.followup.send(ER("ROL İŞLEMİ HATASI", str(ex)[:500]), ephemeral=True)
-            style = discord.ButtonStyle.success if i < 5 else discord.ButtonStyle.secondary
-            self.btn(nm[:80], cb, style=style, emoji="🎭", cid="kr_" + self.mid + "_" + str(rid), row=i // 5)
+class RoleMenuPanel(View):
+    def __init__(self, mid, roles, text=" "):
+        super().__init__(timeout=None)
+        self.mid = str(mid); self.text = text
+        opts = []
+        for rid, nm in roles[:25]:
+            opts.append(discord.SelectOption(label=str(nm)[:100], value=str(rid), emoji="🎭", description="Rolü al / kaldır"))
+        if not opts:
+            return
+        sel = Select(placeholder="🎭 Rollerinden seçim yap...", min_values=0, max_values=1, options=opts, custom_id="kr_select_" + self.mid)
+        async def cb(it):
+            await it.response.defer(ephemeral=True)
+            if not it.guild: return
+            rid = int(sel.values[0]) if sel.values else 0
+            r = it.guild.get_role(rid)
+            if not r:
+                return await it.followup.send(ER("ROL BULUNAMADI", "Bu rol silinmiş. Yönetici `k!butonrollist` ile menüyü kontrol edebilir."), ephemeral=True)
+            me = it.guild.me
+            if not me or not me.guild_permissions.manage_roles:
+                return await it.followup.send(ER("BOT YETKİSİ EKSİK", "Botun **Rolleri Yönet** yetkisi yok."), ephemeral=True)
+            if r.is_default() or r.managed or r >= me.top_role:
+                return await it.followup.send(ER("ROL UYGUN DEĞİL", "Bu rol bot tarafından yönetilemez. Bot rolünü hedef rolün üstüne taşı."), ephemeral=True)
+            try:
+                if r in it.user.roles:
+                    await it.user.remove_roles(r, reason="Katre Select Rol")
+                    msg = e("cross") + " **" + r.name + "** rolü kaldırıldı."
+                    await guild_log_send(it.guild, head("shield", "ROL KALDIRILDI") + "\n\n" + it.user.mention + " → " + r.mention, "role")
+                else:
+                    await it.user.add_roles(r, reason="Katre Select Rol")
+                    msg = e("check") + " **" + r.name + "** rolü verildi."
+                    await guild_log_send(it.guild, head("shield", "ROL VERİLDİ") + "\n\n" + it.user.mention + " → " + r.mention, "role")
+                await it.followup.send(head("shield", "ROL GÜNCELLENDİ") + "\n\n" + msg, ephemeral=True)
+            except discord.Forbidden:
+                await it.followup.send(ER("ROL VERİLEMEDİ", "Discord botun bu role erişmesine izin vermedi."), ephemeral=True)
+            except Exception as ex:
+                await it.followup.send(ER("ROL İŞLEMİ HATASI", str(ex)[:500]), ephemeral=True)
+        sel.callback = cb
+        self.add_item(sel)
+
 
 # ═══════════════════════════════════════════════════════════════════
 # 🎫 TİCKET SİSTEMİ v5.9 (select panel • öncelik • üstlenen yetkili kilidi)
@@ -1032,10 +1067,7 @@ async def ticket_transcript(ch, t):
 async def ticket_finish(guild, ch, t, closer):
     db.q("UPDATE tickets SET status='closed' WHERE channel_id=?", (ch.id,)); t["status"] = "closed"
     data = await ticket_transcript(ch, t); num = str(t.get("number") or ch.id); fn = "talep-" + num + ".txt"
-    r = db.one("SELECT channel_id FROM guild_logs WHERE guild_id=?", (guild.id,)); lc = guild.get_channel(r["channel_id"]) if r and r["channel_id"] else None
-    if lc:
-        try: await lc.send("🎫 **Talep #" + num + " kapandı** • Açan: <@" + str(t["user_id"]) + "> • Kapatan: " + closer.mention, file=discord.File(io.BytesIO(data), filename=fn), allowed_mentions=discord.AllowedMentions.none())
-        except Exception: pass
+    await guild_log_send(guild, "🎫 **Talep #" + num + " kapandı** • Açan: <@" + str(t["user_id"]) + "> • Kapatan: " + closer.mention, "ticket")
     u = guild.get_member(t["user_id"])
     if u:
         try: await u.send(OK("TALEBİN KAPATILDI", "**" + guild.name + "** sunucusundaki talebin (#" + num + ") kapatıldı.\nKonuşma kaydı ekte."), file=discord.File(io.BytesIO(data), filename=fn))
@@ -1072,6 +1104,7 @@ async def tk_claim(it):
         try: await it.response.defer()
         except Exception: pass
     await rp_ch(it.channel, OK("🎫 TICKET ÜSTLENİLDİ", it.user.mention + " bu ticketı **üstlendi**.\n🔒 Administrator olmayan diğer yetkililer artık mesaj gönderemez.\n👮 Üstlenen yetkili ve Administrator müdahale edebilir."))
+    await guild_log_send(it.guild, head("ticket", "TICKET ÜSTLENİLDİ") + "\n\nTicket: <#" + str(it.channel.id) + ">\nYetkili: " + it.user.mention, "ticket")
 
 async def tk_trans(it):
     t = db.one("SELECT * FROM tickets WHERE channel_id=?", (it.channel.id,))
@@ -1179,6 +1212,7 @@ class TicketModal(Modal, title="Destek Talebi"):
         await ch.send(OK("🎫 YENİ TICKET", it.user.mention + " tarafından yeni bir **" + nm + "** ticket açıldı.\n" + _priority_text(priority) + " **Öncelik**\n\nYetkili ekipten bir kişi **Üstlen** butonuna basmalıdır.\nÜstlenildikten sonra Administrator olmayan diğer yetkililer yazamaz."), allowed_mentions=discord.AllowedMentions(users=True, roles=True))
         await ch.send(ticket_text(t), view=TicketActionView())
         await ch.send("-# `k!ticket bilgi` • `k!ticket ekle @üye` • `k!ticket çıkar @üye` • `k!ticket kapat`")
+        await guild_log_send(g, head("ticket", "TICKET AÇILDI") + "\n\nTicket: " + ch.mention + "\nAçan: " + it.user.mention + "\nTür: **" + nm + "**\n" + _priority_text(priority) + " **Öncelik**", "ticket")
         await it.followup.send(OK("TİCKET OLUŞTURULDU", "Özel ticket kanalın hazır: " + ch.mention + "\nÖncelik: **" + TICKET_PRIORITIES[priority][1] + "**"), view=TicketGoView(ch.jump_url), ephemeral=True)
 
 class TicketPanel(TicketOpenView): pass
@@ -1421,12 +1455,7 @@ class KatreBot(commands.Bot):
         try: await m.timeout(datetime.timedelta(minutes=mn), reason=r); return True
         except Exception: return False
     async def mod_log(self, g, t):
-        p = db.one("SELECT log_ch FROM protections WHERE guild_id=?", (g.id,))
-        if p and p["log_ch"]:
-            ch = g.get_channel(p["log_ch"])
-            if ch:
-                try: await rp_ch(ch, t)
-                except Exception: pass
+        await guild_log_send(g, t, "moderation")
     async def wg_reject(self, m, title, body, short, dm_card=True):
         """Hatalı mesajı kanaldan siler, açıklamayı DM'den gönderir. DM kapalıysa kanalda kısa süreli not bırakır."""
         try: await m.delete()
@@ -1588,7 +1617,11 @@ class KatreBot(commands.Bot):
             await self.process_commands(m)
     async def on_voice_state_update(self, member, before, after):
         try:
-            g = member.guild; tv = db.one("SELECT * FROM tempvoice WHERE guild_id=?", (g.id,))
+            g = member.guild
+            if before.channel != after.channel:
+                old = before.channel.mention if before.channel else "—"; new = after.channel.mention if after.channel else "—"
+                await guild_log_send(g, head("mic", "SES DEĞİŞİKLİĞİ") + "\n\n" + member.mention + "\n> " + old + " → " + new, "voice")
+            tv = db.one("SELECT * FROM tempvoice WHERE guild_id=?", (g.id,))
             if tv and after.channel and after.channel.id == tv["trigger_ch"]:
                 cat = g.get_channel(tv["category_id"]) if tv["category_id"] else after.channel.category
                 ow = {g.default_role: discord.PermissionOverwrite(view_channel=False, connect=False), member: discord.PermissionOverwrite(view_channel=True, connect=True, manage_channels=True, mute_members=True, move_members=True), g.me: discord.PermissionOverwrite(view_channel=True, connect=True, manage_channels=True, move_members=True)}
@@ -1605,18 +1638,65 @@ class KatreBot(commands.Bot):
                     try: await chn.delete(reason="Boş")
                     except Exception: pass
         except Exception: traceback.print_exc()
+    async def _reaction_role(self, payload, add=True):
+        if not payload.guild_id or payload.user_id == self.user.id: return
+        row = db.one("SELECT * FROM reaction_roles WHERE guild_id=? AND message_id=? AND emoji=?", (payload.guild_id, payload.message_id, str(payload.emoji)))
+        if not row: return
+        g=self.get_guild(payload.guild_id)
+        if not g: return
+        m=g.get_member(payload.user_id)
+        r=g.get_role(row["role_id"])
+        if not m or not r: return
+        me=g.me
+        try:
+            if add:
+                if me and me.guild_permissions.manage_roles and r < me.top_role: await m.add_roles(r, reason="Katre Reaction Role")
+            else:
+                if me and me.guild_permissions.manage_roles and r < me.top_role: await m.remove_roles(r, reason="Katre Reaction Role")
+            await guild_log_send(g, head("shield", "REACTION ROL") + "\n\n" + m.mention + (" → " if add else " ← ") + r.mention + "\nEmoji: " + str(payload.emoji), "role")
+        except Exception: pass
+    async def on_raw_reaction_add(self, payload):
+        await self._reaction_role(payload, True)
+    async def on_raw_reaction_remove(self, payload):
+        await self._reaction_role(payload, False)
+
+    async def on_guild_channel_create(self, ch):
+        if ch.guild: await guild_log_send(ch.guild, head("gear", "KANAL OLUŞTURULDU") + "\n\n" + ch.mention + " • " + str(ch.type) + " • Oluşturan: Discord/entegrasyon", "channel")
+    async def on_guild_channel_delete(self, ch):
+        if ch.guild: await guild_log_send(ch.guild, head("trash", "KANAL SİLİNDİ") + "\n\n**#" + ch.name + "** • " + str(ch.type), "channel")
+    async def on_guild_channel_update(self, before, after):
+        if before.name != after.name or getattr(before, "category_id", None) != getattr(after, "category_id", None):
+            await guild_log_send(after.guild, head("gear", "KANAL GÜNCELLENDİ") + "\n\n" + after.mention + "\n> " + before.name + " → " + after.name, "channel")
+    async def on_guild_role_create(self, role):
+        await guild_log_send(role.guild, head("shield", "ROL OLUŞTURULDU") + "\n\n" + role.mention + " • ID: `" + str(role.id) + "`", "role")
+    async def on_guild_role_delete(self, role):
+        await guild_log_send(role.guild, head("shield", "ROL SİLİNDİ") + "\n\n**" + role.name + "** • ID: `" + str(role.id) + "`", "role")
+    async def on_guild_role_update(self, before, after):
+        changes=[]
+        if before.name != after.name: changes.append("Ad: `" + before.name + "` → `" + after.name + "`")
+        if before.permissions != after.permissions: changes.append("İzinler değişti")
+        if before.hoist != after.hoist: changes.append("Ayrı gösterim değişti")
+        if changes: await guild_log_send(after.guild, head("shield", "ROL GÜNCELLENDİ") + "\n\n" + after.mention + "\n" + "\n".join(changes), "role")
     async def on_message_edit(self, b, a):
         if b.author.bot or not b.guild or b.content == a.content: return
-        await guild_log_send(b.guild, head("pen", "DÜZENLENDİ") + "\n\n" + b.author.mention + "\n> " + (b.content or "")[:200] + "\n> " + (a.content or "")[:200])
+        await guild_log_send(b.guild, head("pen", "DÜZENLENDİ") + "\n\n" + b.author.mention + "\n> " + (b.content or "")[:200] + "\n> " + (a.content or "")[:200], "message")
     async def on_message_delete(self, m):
         try:
             if m.author.bot or not m.guild: return
             db.q("INSERT OR REPLACE INTO snipe(channel_id,author_id,content,attachment,ts) VALUES(?,?,?,?,?)", (m.channel.id, m.author.id, (m.content or "")[:1000], m.attachments[0].url if m.attachments else None, datetime.datetime.now().isoformat()))
-            await guild_log_send(m.guild, head("trash", "SİLİNDİ") + "\n\n" + m.author.mention + "\n> " + ((m.content or "")[:200] or "_ek_"))
+            await guild_log_send(m.guild, head("trash", "SİLİNDİ") + "\n\n" + m.author.mention + "\n> " + ((m.content or "")[:200] or "_ek_"), "message")
         except Exception: pass
-    async def on_member_remove(self, m): await guild_log_send(m.guild, e("wave") + " **AYRILDI** › " + str(m))
+    async def on_member_remove(self, m):
+        try:
+            s = db.one("SELECT leave_ch FROM servers WHERE guild_id=?", (m.guild.id,))
+            if s and s["leave_ch"]:
+                ch = m.guild.get_channel(s["leave_ch"])
+                if ch:
+                    await send_thumb(ch, head("wave", "GÜLE GÜLE!") + "\n\n" + m.mention + " sunucudan ayrıldı.\n" + KV([(e("dot")+"Üye", str(m)), (e("dot")+"Kalan üye", str(m.guild.member_count or 0))]), getattr(m.display_avatar, "url", None), accent=0xED4245)
+        except Exception: pass
+        await guild_log_send(m.guild, e("wave") + " **AYRILDI** › " + str(m), "member")
     async def on_member_update(self, b, a):
-        if b.nick != a.nick: await guild_log_send(a.guild, head("tag", "NICK") + "\n\n" + a.mention + "\n> " + str(b.nick) + " → " + str(a.nick))
+        if b.nick != a.nick: await guild_log_send(a.guild, head("tag", "NICK") + "\n\n" + a.mention + "\n> " + str(b.nick) + " → " + str(a.nick), "member")
     async def on_command_completion(self, ctx): db.q("INSERT INTO cmd_stats(cmd,uses) VALUES(?,1) ON CONFLICT(cmd) DO UPDATE SET uses=uses+1", (ctx.command.name,))
     async def on_command_error(self, ctx, er):
         if isinstance(er, OwnerOnly): return
@@ -1676,6 +1756,7 @@ class KatreBot(commands.Bot):
                 if ch:
                     try: await send_thumb(ch, head("wave", "HOŞ GELDİN!") + "\n\n### " + mb.mention + "\n" + e("party") + " Aramıza katıldığın için çok sevindik! Sen **" + str(mb.guild.member_count) + ".** üyemizsin.\n\n" + KV([(e("alarm")+"Hesap açılışı", "<t:" + str(int(mb.created_at.timestamp())) + ":R>"), (e("dot")+"Sunucu", mb.guild.name)]) + tip("Kurallara göz atmayı ve kendini tanıtmayı unutma!"), mb.display_avatar.url, accent=0x57F287)
                     except Exception: pass
+            await guild_log_send(mb.guild, head("wave", "ÜYE KATILDI") + "\n\n" + mb.mention + " • " + str(mb) + "\nHesap: <t:" + str(int(mb.created_at.timestamp())) + ":R>", "member")
         try:
             c = db.one("SELECT * FROM counters WHERE guild_id=?", (mb.guild.id,))
             if c and not c["reached"]:
@@ -1929,7 +2010,7 @@ async def yasakla(ctx, u: discord.Member, *, s="—"):
         try: await u.send(ER("YASAKLANDIN", "**" + ctx.guild.name + "** sunucusundan yasaklandın.\nSebep: " + s[:150]))
         except Exception: pass
         await u.ban(reason=str(ctx.author) + ": " + s[:100]); punish_log(ctx.guild.id, u.id, "BAN", s, ctx.author.id)
-        await guild_log_send(ctx.guild, head("hammer", "BAN") + "\n\n" + u.mention + " • Sebep: " + s[:150] + " • Yetkili: " + ctx.author.mention)
+        await guild_log_send(ctx.guild, head("hammer", "BAN") + "\n\n" + u.mention + " • Sebep: " + s[:150] + " • Yetkili: " + ctx.author.mention, "moderation")
         await rp(ctx, OK("ÜYE YASAKLANDI", u.mention + " sunucudan banlandı.\nSebep: " + s[:150] + "\nİşlem siciline kaydedildi." + tip("Yasağı kaldırmak için `k!unban <id>` kullan.")))
 @kategori("mod")
 @bot.command(name="at", aliases=["kick"], help="<@üye> [sebep]")
@@ -1942,7 +2023,7 @@ async def at(ctx, u: discord.Member, *, s="—"):
     if v.value is None: return await rp(ctx, WN("İŞLEM İPTAL", "Süre içinde onay verilmediği için kimse atılmadı."))
     if v.value:
         await u.kick(reason=str(ctx.author) + ": " + s[:100]); punish_log(ctx.guild.id, u.id, "KICK", s, ctx.author.id)
-        await guild_log_send(ctx.guild, head("kick", "KICK") + "\n\n" + u.mention + " • Sebep: " + s[:150] + " • Yetkili: " + ctx.author.mention)
+        await guild_log_send(ctx.guild, head("kick", "KICK") + "\n\n" + u.mention + " • Sebep: " + s[:150] + " • Yetkili: " + ctx.author.mention, "moderation")
         await rp(ctx, OK("ÜYE ATILDI", u.mention + " sunucudan çıkarıldı.\nSebep: " + s[:150] + "\nDavet linkiyle tekrar girebilir."))
 @kategori("mod")
 @bot.command(name="mute", aliases=["sustur"], help="<@üye> <süre> [sebep]")
@@ -1955,7 +2036,7 @@ async def mute(ctx, u: discord.Member, süre: str, *, s="—"):
     except Exception: return await rp(ctx, ER("GEÇERSİZ SÜRE", "Süreyi şöyle yaz: `30m`, `1h`, `2d`.\nÖrnek: `k!mute @üye 30m spam`"))
     if dk < 1 or dk > 40320: return await rp(ctx, ER("GEÇERSİZ SÜRE", "Susturma süresi **1 dakika ile 28 gün** arasında olmalı."))
     await u.timeout(datetime.timedelta(minutes=dk), reason=str(ctx.author) + ": " + s[:100]); punish_log(ctx.guild.id, u.id, "MUTE", s, ctx.author.id, dk)
-    await guild_log_send(ctx.guild, head("lock", "MUTE") + "\n\n" + u.mention + " • **" + sure_txt(dk) + "** • Yetkili: " + ctx.author.mention)
+    await guild_log_send(ctx.guild, head("lock", "MUTE") + "\n\n" + u.mention + " • **" + sure_txt(dk) + "** • Yetkili: " + ctx.author.mention, "moderation")
     await rp(ctx, OK("ÜYE SUSTURULDU", u.mention + " **" + sure_txt(dk) + "** boyunca susturuldu.\nSebep: " + s[:150] + tip("Süre bitince otomatik açılır; erken açmak için `k!unmute`.")))
 @kategori("mod")
 @bot.command(name="unmute", help="<@üye>")
@@ -2127,7 +2208,15 @@ async def hoşgeldin(ctx, ch: discord.TextChannel = None):
         db.q("UPDATE servers SET welcome_ch=NULL WHERE guild_id=?", (ctx.guild.id,)); return await rp(ctx, OK("HOŞ GELDİN MESAJI KAPANDI", "Yeni üyeler için karşılama mesajı artık gönderilmeyecek." + tip("Açmak için `k!hoşgeldin #kanal` yaz.")))
     db.q("UPDATE servers SET welcome_ch=? WHERE guild_id=?", (ch.id, ctx.guild.id)); await rp(ctx, OK("HOŞ GELDİN KANALI AYARLANDI", "Yeni üyeler " + ch.mention + " kanalında karşılanacak. 👋"))
 @kategori("mod")
-@bot.command(name="butonrol", aliases=["rolmenü"], help="<@rol...> [| başlık]")
+@bot.command(name="ayrilma", aliases=["ayrılma","goodbye"], help="<#kanal|kapat>")
+@commands.has_permissions(administrator=True)
+async def ayrilma(ctx, ch: discord.TextChannel = None):
+    ensure_server(ctx.guild.id)
+    if ch is None:
+        db.q("UPDATE servers SET leave_ch=NULL WHERE guild_id=?", (ctx.guild.id,)); return await rp(ctx, OK("AYRILMA MESAJI KAPANDI", "Üye ayrılış mesajları artık gönderilmeyecek." + tip("Açmak için `k!ayrilma #kanal` yaz.")))
+    db.q("UPDATE servers SET leave_ch=? WHERE guild_id=?", (ch.id, ctx.guild.id)); await rp(ctx, OK("AYRILMA KANALI AYARLANDI", "Ayrılan üyeler " + ch.mention + " kanalında duyurulacak. 👋"))
+@kategori("mod")
+@bot.command(name="butonrol", aliases=["rolmenü","rolpanel","selectrol"], help="<@rol...> [| başlık] — Select menü ile rol sistemi")
 @commands.has_permissions(administrator=True)
 @commands.bot_has_permissions(manage_roles=True)
 async def butonrol(ctx, *, raw):
@@ -2149,7 +2238,7 @@ async def butonrol(ctx, *, raw):
     if bad:
         return await rp(ctx, ER("ROL HİYERARŞİSİ", "Botun veremeyeceği roller var: " + ", ".join(r.name for r in bad[:10]) + ". Bot rolünü bu rollerin üstüne taşı."))
     mid = str(random.randint(10**11, 10**12 - 1))
-    t = head("shield", "ROL MENÜSÜ") + "\n\n" + title[:500] + "\n\n" + e("dot") + " Bir role basarak al/kaldır."
+    t = head("shield", "SELECT ROL MENÜSÜ") + "\n\n" + title[:500] + "\n\n" + e("dot") + " Aşağıdaki Select menüden bir rol seç; tekrar seçersen rol kaldırılır."
     v = RoleMenuPanel(mid, [(r.id, r.name) for r in roles], t)
     msg = await rp(ctx, t, v)
     if not msg: return
@@ -2182,6 +2271,34 @@ async def butonrolsil(ctx, mid: str):
             await msg.edit(view=None)
         except Exception: pass
     await rp(ctx, OK("BUTONROL SİLİNDİ", "`" + mid + "` menüsü kaldırıldı ve kayıt silindi."))
+
+@kategori("mod")
+@bot.command(name="tepkırol", aliases=["tepkı-rol","reactionrol"], help="<mesaj-id> <emoji> @rol")
+@commands.has_permissions(administrator=True)
+@commands.bot_has_permissions(manage_roles=True, add_reactions=True, read_message_history=True)
+async def tepkırol(ctx, message_id: int, emoji: str, role: discord.Role):
+    me=ctx.guild.me
+    if role.is_default() or role.managed or role >= me.top_role: return await rp(ctx,ER("ROL HİYERARŞİSİ","Botun veremeyeceği bir rol seçtin."))
+    try:
+        ch=ctx.channel; msg=await ch.fetch_message(message_id); await msg.add_reaction(emoji)
+    except Exception as ex: return await rp(ctx,ER("REACTION AYARLANAMADI","Mesaj bulunamadı veya emoji eklenemedi.\n`"+str(ex)[:180]+"`"))
+    db.q("INSERT OR REPLACE INTO reaction_roles(message_id,guild_id,channel_id,emoji,role_id) VALUES(?,?,?,?,?)",(message_id,ctx.guild.id,ch.id,emoji,str(role.id)))
+    await guild_log_send(ctx.guild,head("shield","REACTION ROL AYARLANDI")+"\n\nMesaj: `"+str(message_id)+"`\nEmoji: "+emoji+"\nRol: "+role.mention+"\nYetkili: "+ctx.author.mention,"role")
+    await rp(ctx,OK("REACTION ROL AYARLANDI",emoji+" tepkisine basanlara "+role.mention+" verilecek. Tekrar basınca rol kaldırılır."))
+
+@kategori("mod")
+@bot.command(name="tepkırollist", aliases=["reactionrollist"], help="Reaction rol listesini gösterir")
+@commands.has_permissions(administrator=True)
+async def tepkırollist(ctx):
+    rows=db.all("SELECT * FROM reaction_roles WHERE guild_id=? ORDER BY message_id",(ctx.guild.id,))
+    if not rows: return await rp(ctx,WN("REACTION ROL YOK","Bu sunucuda reaction rol ayarı bulunmuyor."))
+    await rp(ctx,head("shield","REACTION ROLLER")+"\n\n"+"\n".join(e("arrow")+" Mesaj `"+str(r["message_id"])+"` • "+r["emoji"]+" → <@&"+str(r["role_id"])+">" for r in rows[:30]))
+
+@kategori("mod")
+@bot.command(name="tepkırolsil", aliases=["reactionrolsil"], help="<mesaj-id> <emoji>")
+@commands.has_permissions(administrator=True)
+async def tepkırolsil(ctx, message_id: int, emoji: str):
+    db.q("DELETE FROM reaction_roles WHERE guild_id=? AND message_id=? AND emoji=?",(ctx.guild.id,message_id,emoji)); await rp(ctx,OK("REACTION ROL SİLİNDİ","Bu emoji-rol bağlantısı kaldırıldı."))
 
 @kategori("mod")
 @bot.command(name="koruma", help="<mod> <aç/kapat>")
@@ -2384,6 +2501,37 @@ async def seviyerol(ctx, i: str, s: int = 0, role: discord.Role = None):
     else:
         rs = db.all("SELECT * FROM level_roles WHERE guild_id=? ORDER BY level", (g,))
         await rp(ctx, head("chartup", "SEVİYE ROL ÖDÜLLERİ") + "\n\n" + (("\n".join(e("arrow") + " Seviye **" + str(r["level"]) + "** → <@&" + str(r["role_id"]) + ">" for r in rs)) if rs else "Henüz seviye ödülü yok." + tip("Eklemek için `k!seviyerol ekle 5 @Rol`")))
+LOG_EVENT_KEYS = {"sunucu":"server","uye":"member","üye":"member","mesaj":"message","moderasyon":"moderation","rol":"role","kanal":"channel","ses":"voice","ticket":"ticket","hepsi":"all"}
+@kategori("sys")
+@bot.command(name="logayarla", help="<tür> <#kanal|kapat>")
+@commands.has_permissions(administrator=True)
+async def logayarla(ctx, tur: str, *, hedef: str = None):
+    key=LOG_EVENT_KEYS.get(tur.lower().replace("ı","i"), LOG_EVENT_KEYS.get(tur.lower()))
+    if not key: return await rp(ctx,ER("GEÇERSİZ LOG TÜRÜ","Türler: `sunucu`, `uye`, `mesaj`, `moderasyon`, `rol`, `kanal`, `ses`, `ticket`, `hepsi`"))
+    hedef=(hedef or "").strip()
+    if hedef.lower() in ("kapat","off","kapa","0"):
+        ch=None
+    else:
+        try: ch=await commands.TextChannelConverter().convert(ctx,hedef)
+        except commands.ChannelNotFound: return await rp(ctx,ER("KANAL BULUNAMADI","Geçerli bir metin kanalı belirt veya `kapat` yaz."))
+    if key == "all":
+        if ch is None:
+            db.q("DELETE FROM log_channels WHERE guild_id=?",(ctx.guild.id,)); return await rp(ctx,OK("TÜM AYRI LOG KANALLARI KAPATILDI","Detaylı log yönlendirmeleri sıfırlandı."))
+        for ev in ("server","member","message","moderation","role","channel","voice","ticket"):
+            db.q("INSERT OR REPLACE INTO log_channels(guild_id,event,channel_id) VALUES(?,?,?)",(ctx.guild.id,ev,ch.id))
+        return await rp(ctx,OK("TÜM LOGLAR AYARLANDI","Tüm log türleri "+ch.mention+" kanalına gönderilecek."))
+    if ch is None:
+        db.q("DELETE FROM log_channels WHERE guild_id=? AND event=?",(ctx.guild.id,key)); return await rp(ctx,OK(LOG_LABELS.get(key,"Log").upper()+" LOGU KAPATILDI","Bu tür için özel log kanalı kaldırıldı."))
+    db.q("INSERT OR REPLACE INTO log_channels(guild_id,event,channel_id) VALUES(?,?,?)",(ctx.guild.id,key,ch.id)); await rp(ctx,OK(LOG_LABELS.get(key,"Log").upper()+" LOGU AYARLANDI",LOG_LABELS.get(key,"Log")+" olayları artık "+ch.mention+" kanalına gönderilecek."))
+@kategori("sys")
+@bot.command(name="loglar", aliases=["logdurum"], help="Ayarlı log kanallarını gösterir")
+@commands.has_permissions(administrator=True)
+async def loglar(ctx):
+    rows=db.all("SELECT * FROM log_channels WHERE guild_id=? ORDER BY event",(ctx.guild.id,)); lines=[]
+    for ev in ("server","member","message","moderation","role","channel","voice","ticket"):
+        r=next((x for x in rows if x["event"]==ev),None); lines.append((e("check") if r and r["channel_id"] else e("cross"))+" **"+LOG_LABELS[ev]+"** → "+("<#"+str(r["channel_id"])+">" if r and r["channel_id"] else "Ayarlanmadı"))
+    await rp(ctx,head("log","LOG AYARLARI")+"\n\n"+"\n".join(lines)+tip("Ayarlamak için `k!logayarla <tür> #kanal` • Hepsi için `k!logayarla hepsi #kanal`"))
+
 @kategori("sys")
 @bot.command(name="sunuculog", help="<#kanal|kapat>")
 @commands.has_permissions(administrator=True)
