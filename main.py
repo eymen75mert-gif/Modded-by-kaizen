@@ -2273,7 +2273,7 @@ async def butonrolsil(ctx, mid: str):
     await rp(ctx, OK("BUTONROL SİLİNDİ", "`" + mid + "` menüsü kaldırıldı ve kayıt silindi."))
 
 @kategori("mod")
-@bot.command(name="tepkırol", aliases=["tepkı-rol","reactionrol"], help="<mesaj-id> <emoji> @rol")
+@bot.command(name="tepkırol", aliases=["tepkı-rol","reactionrol","tepkirol"], help="<mesaj-id> <emoji> @rol")
 @commands.has_permissions(administrator=True)
 @commands.bot_has_permissions(manage_roles=True, add_reactions=True, read_message_history=True)
 async def tepkırol(ctx, message_id: int, emoji: str, role: discord.Role):
