@@ -50,8 +50,15 @@ BACKUP_CH = int(os.getenv("BACKUP_CHANNEL_ID", "0"))
 MARKER = "#KATRE_YEDEK"
 DIV = "──────────────────────────────"
 PAGE_SIZE = 15
-BOT_VERSION = "6.1"
+BOT_VERSION = "6.2"
 CHANGELOG = {
+    "6.2": [
+        "📚 Full log kapsamı genişletildi: ban/unban, timeout, üye rol/nick değişimi, kanal/rol, davet, webhook, thread, emoji/sticker ve komut olayları",
+        "🧪 `k!logtest`, `k!logkapat`, `k!logtemizle` ve `k!logdetay` eklendi",
+        "👋 Hoş geldin/ayrılma mesajları Components V2 kartları olarak gönderiliyor",
+        "🎨 Hoş geldin/ayrılma mesajları için özel şablon, değişkenler, test ve bilgi komutları eklendi",
+        "⚙️ Log türleri ayrı ayrı kanallara yönlendirilebiliyor; `hepsi` ile tek kanala bağlanabiliyor",
+    ],
     "6.1": [
         "👋 Hoş geldin ve ayrılma mesajları ayrı ayrı kanal seçilebilir hale getirildi",
         "🎭 Select rol paneli geliştirildi; `k!rolpanel` ve `k!selectrol` ile kullanılabilir",
@@ -126,7 +133,7 @@ class DB:
         self.conn = sqlite3.connect(path, check_same_thread=False); self.conn.row_factory = sqlite3.Row
         c = self.conn.cursor()
         c.executescript("""
-        CREATE TABLE IF NOT EXISTS servers(guild_id INTEGER PRIMARY KEY, prefix TEXT DEFAULT 'k!', welcome_ch INTEGER, leave_ch INTEGER, auto_role INTEGER, rank_on INTEGER DEFAULT 1, joined_at TEXT);
+        CREATE TABLE IF NOT EXISTS servers(guild_id INTEGER PRIMARY KEY, prefix TEXT DEFAULT 'k!', welcome_ch INTEGER, leave_ch INTEGER, auto_role INTEGER, rank_on INTEGER DEFAULT 1, joined_at TEXT, welcome_message TEXT, leave_message TEXT);
         CREATE TABLE IF NOT EXISTS users(user_id INTEGER PRIMARY KEY, name TEXT, xp INTEGER DEFAULT 0, level INTEGER DEFAULT 1, coins INTEGER DEFAULT 0, messages INTEGER DEFAULT 0, warnings INTEGER DEFAULT 0, pro INTEGER DEFAULT 0, pro_expiry TEXT, pro_color TEXT, pro_tag TEXT, xp2 INTEGER DEFAULT 0, birthday TEXT, notes TEXT DEFAULT '[]', rep INTEGER DEFAULT 0);
         CREATE TABLE IF NOT EXISTS owner_settings(id INTEGER PRIMARY KEY DEFAULT 1, maintenance INTEGER DEFAULT 0);
         CREATE TABLE IF NOT EXISTS bot_meta(key TEXT PRIMARY KEY, value TEXT);
@@ -159,7 +166,7 @@ class DB:
         CREATE TABLE IF NOT EXISTS polls(id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id INTEGER, channel_id INTEGER, message_id INTEGER DEFAULT 0, question TEXT, options TEXT, votes TEXT DEFAULT '{}', status TEXT DEFAULT 'active', creator INTEGER, ts TEXT);
         CREATE TABLE IF NOT EXISTS wordgame(guild_id INTEGER PRIMARY KEY, channel_id INTEGER, last_word TEXT, last_user INTEGER, streak INTEGER DEFAULT 0);
         INSERT OR IGNORE INTO owner_settings(id) VALUES (1);""")
-        for t, col, ty in (("servers","leave_ch","INTEGER"),("users","pro_tag","TEXT"),("users","xp2","INTEGER DEFAULT 0"),("tickets","claimed_by","INTEGER"),("afk","mentions","INTEGER DEFAULT 0"),("tickets","subject","TEXT"),("tickets","category","TEXT"),("tickets","created_at","TEXT"),("tickets","number","INTEGER"),("tickets","description","TEXT"),("tickets","priority","TEXT DEFAULT 'normal'"),("role_menus","channel_id","INTEGER"),("role_menus","message_id","INTEGER"),("role_menus","title","TEXT")):
+        for t, col, ty in (("servers","leave_ch","INTEGER"),("servers","welcome_message","TEXT"),("servers","leave_message","TEXT"),("users","pro_tag","TEXT"),("users","xp2","INTEGER DEFAULT 0"),("tickets","claimed_by","INTEGER"),("afk","mentions","INTEGER DEFAULT 0"),("tickets","subject","TEXT"),("tickets","category","TEXT"),("tickets","created_at","TEXT"),("tickets","number","INTEGER"),("tickets","description","TEXT"),("tickets","priority","TEXT DEFAULT 'normal'"),("role_menus","channel_id","INTEGER"),("role_menus","message_id","INTEGER"),("role_menus","title","TEXT")):
             try: c.execute("ALTER TABLE " + t + " ADD COLUMN " + col + " " + ty)
             except sqlite3.OperationalError: pass
         self.conn.commit()
@@ -473,12 +480,15 @@ def get_msg_text(m):
     except Exception: pass
     return "\n".join(outs) if outs else (m.content or "")
 LOG_EVENTS = {
-    "sunucu": "server", "uye": "member", "mesaj": "message", "moderasyon": "moderation",
-    "rol": "role", "kanal": "channel", "ses": "voice", "ticket": "ticket", "koruma": "moderation", "server": "server"
+    "sunucu": "server", "uye": "member", "üye": "member", "mesaj": "message", "moderasyon": "moderation",
+    "rol": "role", "kanal": "channel", "ses": "voice", "ticket": "ticket", "koruma": "moderation",
+    "davet": "invite", "webhook": "webhook", "thread": "thread", "emoji": "emoji", "sticker": "sticker",
+    "komut": "command", "bot": "bot", "hepsi": "all", "server": "server"
 }
 LOG_LABELS = {
     "server": "Sunucu", "member": "Üye", "message": "Mesaj", "moderation": "Moderasyon",
-    "role": "Rol", "channel": "Kanal", "voice": "Ses", "ticket": "Ticket"
+    "role": "Rol", "channel": "Kanal", "voice": "Ses", "ticket": "Ticket", "invite": "Davet",
+    "webhook": "Webhook", "thread": "Thread", "emoji": "Emoji", "sticker": "Sticker", "command": "Komut", "bot": "Bot"
 }
 async def guild_log_send(g, t, event="server"):
     event = LOG_EVENTS.get(str(event).lower(), str(event).lower())
@@ -498,7 +508,53 @@ async def guild_log_send(g, t, event="server"):
                 await rp_ch(ch, t); sent = True
             except Exception: pass
     return sent
-VERSION_TAGLINE = {"6.1": "Hoş geldin/ayrılma • Select + reaction rol • ayrıntılı ayarlanabilir log sistemi", "6.0": "Çalışan ticket butonları • ticket'a git • kalıcı select panel • öncelik akışı", "5.8": "Gelişmiş ticket • select panel • öncelik • yetkili kilidi", "5.7": "Free AI API • gelişmiş butonrol sistemi • kalıcı rol panelleri", "5.6": "AI resim • Free 7/gün • Pro sınırsız • gelişmiş çekiliş yönetimi", "5.5": "Yardım menüsü düzeltmesi • avatarlı kartlar • 6 yeni komut", "5.4": "Premium kartlar • V2 ticket • yeni yardım menüsü", "5.3": "Açıklayıcı hatalar • TDK kelime oyunu", "5.2": "Duyuru sistemi • V2 yardım"}
+
+def _format_greeting(template, member, kind="welcome"):
+    if not template:
+        template = ("## 👋 HOŞ GELDİN!\n\n{mention} **{server}** sunucusuna hoş geldin!\n\n"
+                    "🎉 Sen bizim **{count}.** üyemizsin.\n🕐 Hesabın {account_age} önce oluşturulmuş.\n"
+                    "📌 Kurallara göz atmayı ve topluluğa katılmayı unutma!") if kind == "welcome" else                    ("## 👋 GÜLE GÜLE!\n\n{mention} sunucudan ayrıldı.\n\n"
+                    "👥 Sunucuda **{count}** kişi kaldı.\n🕐 Üyelik süresi: {joined_for}\n"
+                    "💙 Seni tekrar görmek isteriz!")
+    now = datetime.datetime.now(datetime.timezone.utc)
+    created = getattr(member, "created_at", now)
+    joined = getattr(member, "joined_at", None)
+    account_age = _human_delta(created, now)
+    joined_for = _human_delta(joined, now) if joined else "bilinmiyor"
+    vals = {
+        "user": str(member), "mention": member.mention, "name": member.display_name,
+        "server": member.guild.name, "count": str(member.guild.member_count or 0),
+        "id": str(member.id), "account_age": account_age, "joined_for": joined_for,
+        "created": discord.utils.format_dt(created, "R") if created else "-",
+        "joined": discord.utils.format_dt(joined, "R") if joined else "-"
+    }
+    try: return template.format(**vals)[:3800]
+    except Exception: return template[:3800]
+
+def _human_delta(start, end):
+    if not start: return "bilinmiyor"
+    sec = max(0, int((end - start).total_seconds()))
+    if sec < 60: return str(sec) + " saniye"
+    if sec < 3600: return str(sec // 60) + " dakika"
+    if sec < 86400: return str(sec // 3600) + " saat"
+    if sec < 2592000: return str(sec // 86400) + " gün"
+    if sec < 31536000: return str(sec // 2592000) + " ay"
+    return str(sec // 31536000) + " yıl"
+
+def _greeting_view(text, member, accent):
+    con = _new_con(accent)
+    heading = "## " + ("👋 HOŞ GELDİN!" if accent == 0x57F287 else "👋 GÜLE GÜLE!")
+    if Section is not None and Thumbnail is not None:
+        try: con.add_item(Section(TextDisplay(heading), accessory=Thumbnail(str(member.display_avatar.url))))
+        except Exception: con.add_item(TextDisplay(heading))
+    else: con.add_item(TextDisplay(heading))
+    _sep(con); con.add_item(TextDisplay(text[:3800])); _sep(con, False)
+    con.add_item(TextDisplay("-# Katre Bot v" + BOT_VERSION + " • Components V2"))
+    try: lv = LayoutView(timeout=None)
+    except TypeError: lv = LayoutView()
+    lv.add_item(con); return lv
+
+VERSION_TAGLINE = {"6.2": "Components V2 karşılama • genişletilmiş full log • ayarlanabilir mesaj şablonları", "6.0": "Çalışan ticket butonları • ticket'a git • kalıcı select panel • öncelik akışı", "5.8": "Gelişmiş ticket • select panel • öncelik • yetkili kilidi", "5.7": "Free AI API • gelişmiş butonrol sistemi • kalıcı rol panelleri", "5.6": "AI resim • Free 7/gün • Pro sınırsız • gelişmiş çekiliş yönetimi", "5.5": "Yardım menüsü düzeltmesi • avatarlı kartlar • 6 yeni komut", "5.4": "Premium kartlar • V2 ticket • yeni yardım menüsü", "5.3": "Açıklayıcı hatalar • TDK kelime oyunu", "5.2": "Duyuru sistemi • V2 yardım"}
 def update_text(ver, prev=None):
     L = [e("party") + " **KATRE v" + ver + " YAYINDA!**", DIV, e("spark") + " " + VERSION_TAGLINE.get(ver, "Yeni sürüm yayında")]
     ns = CHANGELOG.get(ver, [])
@@ -1665,8 +1721,20 @@ class KatreBot(commands.Bot):
     async def on_guild_channel_delete(self, ch):
         if ch.guild: await guild_log_send(ch.guild, head("trash", "KANAL SİLİNDİ") + "\n\n**#" + ch.name + "** • " + str(ch.type), "channel")
     async def on_guild_channel_update(self, before, after):
-        if before.name != after.name or getattr(before, "category_id", None) != getattr(after, "category_id", None):
-            await guild_log_send(after.guild, head("gear", "KANAL GÜNCELLENDİ") + "\n\n" + after.mention + "\n> " + before.name + " → " + after.name, "channel")
+        changes = []
+        if before.name != after.name: changes.append("Ad: `" + before.name + "` → `" + after.name + "`")
+        if getattr(before, "category_id", None) != getattr(after, "category_id", None): changes.append("Kategori değişti")
+        if getattr(before, "topic", None) != getattr(after, "topic", None): changes.append("Konu değişti")
+        if getattr(before, "slowmode_delay", None) != getattr(after, "slowmode_delay", None): changes.append("Yavaş mod: `" + str(getattr(before, "slowmode_delay", 0)) + "` → `" + str(getattr(after, "slowmode_delay", 0)) + "` sn")
+        if getattr(before, "nsfw", None) != getattr(after, "nsfw", None): changes.append("NSFW: `" + str(getattr(after, "nsfw", False)) + "`")
+        if getattr(before, "default_auto_archive_duration", None) != getattr(after, "default_auto_archive_duration", None): changes.append("Otomatik arşiv süresi değişti")
+        if changes: await guild_log_send(after.guild, head("gear", "KANAL GÜNCELLENDİ") + "\n\n" + after.mention + "\n" + "\n".join(changes), "channel")
+    async def on_guild_channel_pins_update(self, channel, last_pin):
+        await guild_log_send(channel.guild, head("pin", "KANAL SABİTLERİ DEĞİŞTİ") + "\n\nKanal: " + channel.mention + "\nSon sabit: " + (discord.utils.format_dt(last_pin, "R") if last_pin else "Yok"), "channel")
+
+    async def on_guild_integrations_update(self, guild):
+        await guild_log_send(guild, head("gear", "ENTEGRASYONLAR GÜNCELLENDİ") + "\n\nSunucunun entegrasyon ayarları değişti.", "server")
+
     async def on_guild_role_create(self, role):
         await guild_log_send(role.guild, head("shield", "ROL OLUŞTURULDU") + "\n\n" + role.mention + " • ID: `" + str(role.id) + "`", "role")
     async def on_guild_role_delete(self, role):
@@ -1679,25 +1747,97 @@ class KatreBot(commands.Bot):
         if changes: await guild_log_send(after.guild, head("shield", "ROL GÜNCELLENDİ") + "\n\n" + after.mention + "\n" + "\n".join(changes), "role")
     async def on_message_edit(self, b, a):
         if b.author.bot or not b.guild or b.content == a.content: return
-        await guild_log_send(b.guild, head("pen", "DÜZENLENDİ") + "\n\n" + b.author.mention + "\n> " + (b.content or "")[:200] + "\n> " + (a.content or "")[:200], "message")
+        await guild_log_send(b.guild, head("pen", "MESAJ DÜZENLENDİ") + "\n\nKanal: " + b.channel.mention + "\nYazar: " + b.author.mention + "\nEski: `" + ((b.content or "")[:700] or "_boş_") + "`\nYeni: `" + ((a.content or "")[:700] or "_boş_") + "`\nMesaj: " + a.jump_url, "message")
     async def on_message_delete(self, m):
         try:
             if m.author.bot or not m.guild: return
             db.q("INSERT OR REPLACE INTO snipe(channel_id,author_id,content,attachment,ts) VALUES(?,?,?,?,?)", (m.channel.id, m.author.id, (m.content or "")[:1000], m.attachments[0].url if m.attachments else None, datetime.datetime.now().isoformat()))
-            await guild_log_send(m.guild, head("trash", "SİLİNDİ") + "\n\n" + m.author.mention + "\n> " + ((m.content or "")[:200] or "_ek_"), "message")
+            atts = "\nEkler: " + ", ".join(x.url for x in m.attachments[:5]) if m.attachments else ""
+            await guild_log_send(m.guild, head("trash", "MESAJ SİLİNDİ") + "\n\nKanal: " + m.channel.mention + "\nYazar: " + m.author.mention + "\nİçerik: `" + ((m.content or "")[:900] or "_ek/boş_") + "`" + atts, "message")
         except Exception: pass
     async def on_member_remove(self, m):
         try:
-            s = db.one("SELECT leave_ch FROM servers WHERE guild_id=?", (m.guild.id,))
-            if s and s["leave_ch"]:
+            s = db.one("SELECT * FROM servers WHERE guild_id=?", (m.guild.id,)) or {}
+            if s.get("leave_ch"):
                 ch = m.guild.get_channel(s["leave_ch"])
                 if ch:
-                    await send_thumb(ch, head("wave", "GÜLE GÜLE!") + "\n\n" + m.mention + " sunucudan ayrıldı.\n" + KV([(e("dot")+"Üye", str(m)), (e("dot")+"Kalan üye", str(m.guild.member_count or 0))]), getattr(m.display_avatar, "url", None), accent=0xED4245)
+                    text = _format_greeting(s.get("leave_message"), m, "leave")
+                    if HAS_V2:
+                        await ch.send(view=_greeting_view(text, m, 0xED4245))
+                    else:
+                        await ch.send(text)
         except Exception: pass
-        await guild_log_send(m.guild, e("wave") + " **AYRILDI** › " + str(m), "member")
+        await guild_log_send(m.guild, e("wave") + " **AYRILDI** › " + str(m) + " • ID: `" + str(m.id) + "`", "member")
     async def on_member_update(self, b, a):
-        if b.nick != a.nick: await guild_log_send(a.guild, head("tag", "NICK") + "\n\n" + a.mention + "\n> " + str(b.nick) + " → " + str(a.nick), "member")
-    async def on_command_completion(self, ctx): db.q("INSERT INTO cmd_stats(cmd,uses) VALUES(?,1) ON CONFLICT(cmd) DO UPDATE SET uses=uses+1", (ctx.command.name,))
+        changes = []
+        if b.nick != a.nick: changes.append("🏷️ Nick: `" + str(b.nick or a.name) + "` → `" + str(a.nick or a.name) + "`")
+        br = {r.id: r for r in b.roles}; ar = {r.id: r for r in a.roles}
+        added = [ar[x].mention for x in ar.keys() - br.keys() if not ar[x].is_default()]
+        removed = [br[x].mention for x in br.keys() - ar.keys() if not br[x].is_default()]
+        if added: changes.append("➕ Roller: " + ", ".join(added[:15]))
+        if removed: changes.append("➖ Roller: " + ", ".join(removed[:15]))
+        if b.timed_out_until != a.timed_out_until:
+            changes.append("⏱️ Timeout: " + (discord.utils.format_dt(a.timed_out_until, "R") if a.timed_out_until else "kaldırıldı"))
+        if changes:
+            await guild_log_send(a.guild, head("shield", "ÜYE GÜNCELLENDİ") + "\n\n" + a.mention + " • ID: `" + str(a.id) + "`\n" + "\n".join(changes), "member")
+
+    async def on_member_ban(self, guild, user):
+        await guild_log_send(guild, head("hammer", "BAN") + "\n\nÜye: <@" + str(user.id) + "> • ID: `" + str(user.id) + "`", "moderation")
+
+    async def on_member_unban(self, guild, user):
+        await guild_log_send(guild, head("unlock", "UNBAN") + "\n\nKullanıcı: <@" + str(user.id) + "> • ID: `" + str(user.id) + "`", "moderation")
+
+    async def on_bulk_message_delete(self, messages):
+        if not messages: return
+        g = messages[0].guild
+        if not g: return
+        await guild_log_send(g, head("trash", "TOPLU MESAJ SİLİNDİ") + "\n\nKanal: " + messages[0].channel.mention + "\nMesaj sayısı: **" + str(len(messages)) + "**", "message")
+
+    async def on_guild_update(self, before, after):
+        changes = []
+        if before.name != after.name: changes.append("Ad: `" + before.name + "` → `" + after.name + "`")
+        if before.icon != after.icon: changes.append("Sunucu ikonu değişti")
+        if before.banner != after.banner: changes.append("Sunucu bannerı değişti")
+        if before.description != after.description: changes.append("Açıklama değişti")
+        if before.verification_level != after.verification_level: changes.append("Doğrulama seviyesi değişti")
+        if before.default_notifications != after.default_notifications: changes.append("Varsayılan bildirim ayarı değişti")
+        if changes: await guild_log_send(after, head("gear", "SUNUCU GÜNCELLENDİ") + "\n\n" + "\n".join(changes), "server")
+
+    async def on_invite_create(self, invite):
+        if invite.guild: await guild_log_send(invite.guild, head("link", "DAVET OLUŞTURULDU") + "\n\nKanal: " + (invite.channel.mention if invite.channel else "-") + "\nKod: `" + str(invite.code) + "`\nOluşturan: " + (invite.inviter.mention if invite.inviter else "Bilinmiyor"), "invite")
+
+    async def on_invite_delete(self, invite):
+        if invite.guild: await guild_log_send(invite.guild, head("link", "DAVET SİLİNDİ") + "\n\nKanal: " + (invite.channel.mention if invite.channel else "-") + "\nKod: `" + str(invite.code) + "`", "invite")
+
+    async def on_webhooks_update(self, channel):
+        await guild_log_send(channel.guild, head("gear", "WEBHOOK GÜNCELLENDİ") + "\n\nKanal: " + channel.mention, "webhook")
+
+    async def on_thread_create(self, thread):
+        await guild_log_send(thread.guild, head("chat", "THREAD OLUŞTURULDU") + "\n\nThread: <#" + str(thread.id) + ">\nAd: **" + thread.name + "**", "thread")
+
+    async def on_thread_update(self, before, after):
+        changes = []
+        if before.name != after.name: changes.append("Ad: `" + before.name + "` → `" + after.name + "`")
+        if before.archived != after.archived: changes.append("Arşiv: " + str(after.archived))
+        if before.locked != after.locked: changes.append("Kilit: " + str(after.locked))
+        if changes: await guild_log_send(after.guild, head("chat", "THREAD GÜNCELLENDİ") + "\n\n<#" + str(after.id) + ">\n" + "\n".join(changes), "thread")
+
+    async def on_thread_delete(self, thread):
+        await guild_log_send(thread.guild, head("trash", "THREAD SİLİNDİ") + "\n\n**" + thread.name + "** • ID: `" + str(thread.id) + "`", "thread")
+
+    async def on_guild_emojis_update(self, guild, before, after):
+        b = {x.id: x for x in before}; a = {x.id: x for x in after}
+        added = [x.name for i,x in a.items() if i not in b]; removed = [x.name for i,x in b.items() if i not in a]
+        if added or removed: await guild_log_send(guild, head("spark", "EMOJİLER GÜNCELLENDİ") + "\n\n➕ " + (", ".join(added) or "-") + "\n➖ " + (", ".join(removed) or "-"), "emoji")
+
+    async def on_guild_stickers_update(self, guild, before, after):
+        b = {x.id: x for x in before}; a = {x.id: x for x in after}
+        added = [x.name for i,x in a.items() if i not in b]; removed = [x.name for i,x in b.items() if i not in a]
+        if added or removed: await guild_log_send(guild, head("spark", "STICKERLAR GÜNCELLENDİ") + "\n\n➕ " + (", ".join(added) or "-") + "\n➖ " + (", ".join(removed) or "-"), "sticker")
+    async def on_command_completion(self, ctx):
+        db.q("INSERT INTO cmd_stats(cmd,uses) VALUES(?,1) ON CONFLICT(cmd) DO UPDATE SET uses=uses+1", (ctx.command.name,))
+        if ctx.guild:
+            await guild_log_send(ctx.guild, head("terminal", "KOMUT KULLANILDI") + "\n\nKullanıcı: " + ctx.author.mention + " • ID: `" + str(ctx.author.id) + "`\nKanal: " + ctx.channel.mention + "\nKomut: `" + ctx.message.content[:500].replace("`", "ˋ") + "`", "command")
     async def on_command_error(self, ctx, er):
         if isinstance(er, OwnerOnly): return
         if isinstance(er, ProOnly):
@@ -1754,7 +1894,10 @@ class KatreBot(commands.Bot):
             if s["welcome_ch"]:
                 ch = mb.guild.get_channel(s["welcome_ch"])
                 if ch:
-                    try: await send_thumb(ch, head("wave", "HOŞ GELDİN!") + "\n\n### " + mb.mention + "\n" + e("party") + " Aramıza katıldığın için çok sevindik! Sen **" + str(mb.guild.member_count) + ".** üyemizsin.\n\n" + KV([(e("alarm")+"Hesap açılışı", "<t:" + str(int(mb.created_at.timestamp())) + ":R>"), (e("dot")+"Sunucu", mb.guild.name)]) + tip("Kurallara göz atmayı ve kendini tanıtmayı unutma!"), mb.display_avatar.url, accent=0x57F287)
+                    try:
+                        text = _format_greeting(s.get("welcome_message"), mb, "welcome")
+                        if HAS_V2: await ch.send(view=_greeting_view(text, mb, 0x57F287))
+                        else: await ch.send(text)
                     except Exception: pass
             await guild_log_send(mb.guild, head("wave", "ÜYE KATILDI") + "\n\n" + mb.mention + " • " + str(mb) + "\nHesap: <t:" + str(int(mb.created_at.timestamp())) + ":R>", "member")
         try:
@@ -1769,11 +1912,18 @@ class KatreBot(commands.Bot):
         except Exception: pass
     async def on_guild_join(self, g):
         ensure_server(g.id); db.q("INSERT OR IGNORE INTO protections(guild_id) VALUES(?)", (g.id,))
+        if g.system_channel:
+            await guild_log_send(g, head("logo", "BOT SUNUCUYA KATILDI") + "\n\nSunucu: **" + g.name + "** • ID: `" + str(g.id) + "`\nÜye: **" + str(g.member_count or 0) + "**", "bot")
         if not EMO_CACHE: auto_map_emojis(g)
         ch = g.system_channel or next((c for c in g.text_channels if c.permissions_for(g.me).send_messages), None)
         if ch:
             v = Panel(head("logo", "KATRE ARANIZDA") + "\n\n`k!yardım` • `k!kurulum` • `k!kelimekur`"); v.btn_url("Destek", SUPPORT_URL, emoji=e("link"))
             await rp_ch(ch, v.text, v)
+
+    async def on_guild_remove(self, g):
+        try:
+            await guild_log_send(g, head("cross", "BOT SUNUCUDAN AYRILDI") + "\n\nSunucu: **" + g.name + "** • ID: `" + str(g.id) + "`", "bot")
+        except Exception: pass
 
 async def finalize_giveaway(bot, mid):
     gw = db.one("SELECT * FROM giveaways WHERE message_id=?", (mid,))
@@ -2200,21 +2350,89 @@ async def otorol(ctx, *, arg):
     role = await commands.RoleConverter().convert(ctx, arg)
     db.q("UPDATE servers SET auto_role=? WHERE guild_id=?", (role.id, ctx.guild.id)); await rp(ctx, OK("OTOROL AYARLANDI", "Sunucuya giren her yeni üye otomatik olarak " + role.mention + " rolünü alacak."))
 @kategori("mod")
-@bot.command(name="hoşgeldin", aliases=["hosgeldin"], help="<#kanal|kapat>")
+@bot.command(name="hoşgeldin", aliases=["hosgeldin"], help="<#kanal|kapat> — hoş geldin kanalını ayarla")
 @commands.has_permissions(administrator=True)
 async def hoşgeldin(ctx, ch: discord.TextChannel = None):
     ensure_server(ctx.guild.id)
     if ch is None:
-        db.q("UPDATE servers SET welcome_ch=NULL WHERE guild_id=?", (ctx.guild.id,)); return await rp(ctx, OK("HOŞ GELDİN MESAJI KAPANDI", "Yeni üyeler için karşılama mesajı artık gönderilmeyecek." + tip("Açmak için `k!hoşgeldin #kanal` yaz.")))
-    db.q("UPDATE servers SET welcome_ch=? WHERE guild_id=?", (ch.id, ctx.guild.id)); await rp(ctx, OK("HOŞ GELDİN KANALI AYARLANDI", "Yeni üyeler " + ch.mention + " kanalında karşılanacak. 👋"))
+        db.q("UPDATE servers SET welcome_ch=NULL WHERE guild_id=?", (ctx.guild.id,)); return await rp(ctx, OK("HOŞ GELDİN KAPATILDI", "Yeni üyeler için karşılama mesajı artık gönderilmeyecek."))
+    db.q("UPDATE servers SET welcome_ch=? WHERE guild_id=?", (ch.id, ctx.guild.id))
+    await rp(ctx, OK("HOŞ GELDİN AYARLANDI", "Karşılama mesajları artık " + ch.mention + " kanalına Components V2 kartı olarak gönderilecek.\nŞablon: `k!hoşgeldinmesaj`"))
+
 @kategori("mod")
-@bot.command(name="ayrilma", aliases=["ayrılma","goodbye"], help="<#kanal|kapat>")
+@bot.command(name="ayrilma", aliases=["ayrılma","goodbye"], help="<#kanal|kapat> — ayrılma kanalını ayarla")
 @commands.has_permissions(administrator=True)
 async def ayrilma(ctx, ch: discord.TextChannel = None):
     ensure_server(ctx.guild.id)
     if ch is None:
-        db.q("UPDATE servers SET leave_ch=NULL WHERE guild_id=?", (ctx.guild.id,)); return await rp(ctx, OK("AYRILMA MESAJI KAPANDI", "Üye ayrılış mesajları artık gönderilmeyecek." + tip("Açmak için `k!ayrilma #kanal` yaz.")))
-    db.q("UPDATE servers SET leave_ch=? WHERE guild_id=?", (ch.id, ctx.guild.id)); await rp(ctx, OK("AYRILMA KANALI AYARLANDI", "Ayrılan üyeler " + ch.mention + " kanalında duyurulacak. 👋"))
+        db.q("UPDATE servers SET leave_ch=NULL WHERE guild_id=?", (ctx.guild.id,)); return await rp(ctx, OK("AYRILMA KAPATILDI", "Ayrılan üyeler için mesaj gönderilmeyecek."))
+    db.q("UPDATE servers SET leave_ch=? WHERE guild_id=?", (ch.id, ctx.guild.id))
+    await rp(ctx, OK("AYRILMA AYARLANDI", "Ayrılma mesajları artık " + ch.mention + " kanalına Components V2 kartı olarak gönderilecek.\nŞablon: `k!ayrilmamesaj`"))
+
+@kategori("mod")
+@bot.command(name="hoşgeldinmesaj", aliases=["hosgeldinmesaj"], help="[mesaj|sıfırla] — karşılama şablonunu ayarla")
+@commands.has_permissions(administrator=True)
+async def hoşgeldinmesaj(ctx, *, mesaj: str = None):
+    ensure_server(ctx.guild.id)
+    if not mesaj or mesaj.lower() in ("sıfırla","sifirla","reset"):
+        db.q("UPDATE servers SET welcome_message=NULL WHERE guild_id=?", (ctx.guild.id,))
+        return await rp(ctx, OK("HOŞ GELDİN ŞABLONU SIFIRLANDI", "Varsayılan Components V2 karşılama kartı kullanılacak.\nDeğişkenler: `{mention}` `{user}` `{name}` `{server}` `{count}` `{id}` `{account_age}` `{created}` `{joined}`"))
+    if len(mesaj) > 3500: return await rp(ctx, ER("MESAJ ÇOK UZUN", "Karşılama şablonu en fazla **3500** karakter olabilir."))
+    db.q("UPDATE servers SET welcome_message=? WHERE guild_id=?", (mesaj, ctx.guild.id))
+    await rp(ctx, OK("HOŞ GELDİN ŞABLONU AYARLANDI", "Yeni üyelerde bu Components V2 mesajı kullanılacak.\nDeğişkenler: `{mention}` `{user}` `{name}` `{server}` `{count}` `{id}` `{account_age}` `{created}` `{joined}`"))
+
+@kategori("mod")
+@bot.command(name="ayrilmamesaj", aliases=["ayrilmamesaj","ayrılmamesaj"], help="[mesaj|sıfırla] — ayrılma şablonunu ayarla")
+@commands.has_permissions(administrator=True)
+async def ayrilmamesaj(ctx, *, mesaj: str = None):
+    ensure_server(ctx.guild.id)
+    if not mesaj or mesaj.lower() in ("sıfırla","sifirla","reset"):
+        db.q("UPDATE servers SET leave_message=NULL WHERE guild_id=?", (ctx.guild.id,))
+        return await rp(ctx, OK("AYRILMA ŞABLONU SIFIRLANDI", "Varsayılan Components V2 ayrılma kartı kullanılacak.\nDeğişkenler: `{mention}` `{user}` `{name}` `{server}` `{count}` `{id}` `{account_age}` `{joined_for}` `{created}` `{joined}`"))
+    if len(mesaj) > 3500: return await rp(ctx, ER("MESAJ ÇOK UZUN", "Ayrılma şablonu en fazla **3500** karakter olabilir."))
+    db.q("UPDATE servers SET leave_message=? WHERE guild_id=?", (mesaj, ctx.guild.id))
+    await rp(ctx, OK("AYRILMA ŞABLONU AYARLANDI", "Yeni ayrılışlarda bu Components V2 mesajı kullanılacak.\nDeğişkenler: `{mention}` `{user}` `{name}` `{server}` `{count}` `{id}` `{account_age}` `{joined_for}` `{created}` `{joined}`"))
+
+@kategori("mod")
+@bot.command(name="hoşgeldinbilgi", aliases=["hosgeldinbilgi"], help="Karşılama ayarlarını gösterir")
+@commands.has_permissions(administrator=True)
+async def hoşgeldinbilgi(ctx):
+    s = db.one("SELECT * FROM servers WHERE guild_id=?", (ctx.guild.id,)) or {}
+    await rp(ctx, head("wave", "HOŞ GELDİN AYARLARI") + "\n\n" + KV([
+        (e("dot")+"Kanal", "<#"+str(s.get("welcome_ch"))+">" if s.get("welcome_ch") else "Kapalı"),
+        (e("dot")+"Şablon", "Özel" if s.get("welcome_message") else "Varsayılan"),
+        (e("dot")+"V2", "Components V2")
+    ]) + tip("Kanal: `k!hoşgeldin #kanal` • Mesaj: `k!hoşgeldinmesaj <mesaj>` • Test: `k!hoşgeldintest`"))
+
+@kategori("mod")
+@bot.command(name="ayrilmabilgi", aliases=["ayrılmabilgi"], help="Ayrılma ayarlarını gösterir")
+@commands.has_permissions(administrator=True)
+async def ayrilmabilgi(ctx):
+    s = db.one("SELECT * FROM servers WHERE guild_id=?", (ctx.guild.id,)) or {}
+    await rp(ctx, head("wave", "AYRILMA AYARLARI") + "\n\n" + KV([
+        (e("dot")+"Kanal", "<#"+str(s.get("leave_ch"))+">" if s.get("leave_ch") else "Kapalı"),
+        (e("dot")+"Şablon", "Özel" if s.get("leave_message") else "Varsayılan"),
+        (e("dot")+"V2", "Components V2")
+    ]) + tip("Kanal: `k!ayrilma #kanal` • Mesaj: `k!ayrilmamesaj <mesaj>` • Test: `k!ayrilmatest`"))
+
+@kategori("mod")
+@bot.command(name="hoşgeldintest", aliases=["hosgeldintest"], help="Hoş geldin mesajını test eder")
+@commands.has_permissions(administrator=True)
+async def hoşgeldintest(ctx):
+    s = db.one("SELECT * FROM servers WHERE guild_id=?", (ctx.guild.id,)) or {}
+    text = _format_greeting(s.get("welcome_message"), ctx.author, "welcome")
+    if HAS_V2: return await ctx.send(view=_greeting_view(text, ctx.author, 0x57F287))
+    await rp(ctx, text)
+
+@kategori("mod")
+@bot.command(name="ayrilmatest", aliases=["ayrılmatest"], help="Ayrılma mesajını test eder")
+@commands.has_permissions(administrator=True)
+async def ayrilmatest(ctx):
+    s = db.one("SELECT * FROM servers WHERE guild_id=?", (ctx.guild.id,)) or {}
+    text = _format_greeting(s.get("leave_message"), ctx.author, "leave")
+    if HAS_V2: return await ctx.send(view=_greeting_view(text, ctx.author, 0xED4245))
+    await rp(ctx, text)
+
 @kategori("mod")
 @bot.command(name="butonrol", aliases=["rolmenü","rolpanel","selectrol"], help="<@rol...> [| başlık] — Select menü ile rol sistemi")
 @commands.has_permissions(administrator=True)
@@ -2273,7 +2491,7 @@ async def butonrolsil(ctx, mid: str):
     await rp(ctx, OK("BUTONROL SİLİNDİ", "`" + mid + "` menüsü kaldırıldı ve kayıt silindi."))
 
 @kategori("mod")
-@bot.command(name="tepkırol", aliases=["tepkı-rol","reactionrol","tepkirol"], help="<mesaj-id> <emoji> @rol")
+@bot.command(name="tepkırol", aliases=["tepkı-rol","reactionrol"], help="<mesaj-id> <emoji> @rol")
 @commands.has_permissions(administrator=True)
 @commands.bot_has_permissions(manage_roles=True, add_reactions=True, read_message_history=True)
 async def tepkırol(ctx, message_id: int, emoji: str, role: discord.Role):
@@ -2501,13 +2719,13 @@ async def seviyerol(ctx, i: str, s: int = 0, role: discord.Role = None):
     else:
         rs = db.all("SELECT * FROM level_roles WHERE guild_id=? ORDER BY level", (g,))
         await rp(ctx, head("chartup", "SEVİYE ROL ÖDÜLLERİ") + "\n\n" + (("\n".join(e("arrow") + " Seviye **" + str(r["level"]) + "** → <@&" + str(r["role_id"]) + ">" for r in rs)) if rs else "Henüz seviye ödülü yok." + tip("Eklemek için `k!seviyerol ekle 5 @Rol`")))
-LOG_EVENT_KEYS = {"sunucu":"server","uye":"member","üye":"member","mesaj":"message","moderasyon":"moderation","rol":"role","kanal":"channel","ses":"voice","ticket":"ticket","hepsi":"all"}
+LOG_EVENT_KEYS = {"sunucu":"server","uye":"member","üye":"member","mesaj":"message","moderasyon":"moderation","rol":"role","kanal":"channel","ses":"voice","ticket":"ticket","davet":"invite","webhook":"webhook","thread":"thread","emoji":"emoji","sticker":"sticker","komut":"command","bot":"bot","hepsi":"all"}
 @kategori("sys")
 @bot.command(name="logayarla", help="<tür> <#kanal|kapat>")
 @commands.has_permissions(administrator=True)
 async def logayarla(ctx, tur: str, *, hedef: str = None):
     key=LOG_EVENT_KEYS.get(tur.lower().replace("ı","i"), LOG_EVENT_KEYS.get(tur.lower()))
-    if not key: return await rp(ctx,ER("GEÇERSİZ LOG TÜRÜ","Türler: `sunucu`, `uye`, `mesaj`, `moderasyon`, `rol`, `kanal`, `ses`, `ticket`, `hepsi`"))
+    if not key: return await rp(ctx,ER("GEÇERSİZ LOG TÜRÜ","Türler: `sunucu`, `uye`, `mesaj`, `moderasyon`, `rol`, `kanal`, `ses`, `ticket`, `davet`, `webhook`, `thread`, `emoji`, `sticker`, `komut`, `bot`, `hepsi`"))
     hedef=(hedef or "").strip()
     if hedef.lower() in ("kapat","off","kapa","0"):
         ch=None
@@ -2517,7 +2735,7 @@ async def logayarla(ctx, tur: str, *, hedef: str = None):
     if key == "all":
         if ch is None:
             db.q("DELETE FROM log_channels WHERE guild_id=?",(ctx.guild.id,)); return await rp(ctx,OK("TÜM AYRI LOG KANALLARI KAPATILDI","Detaylı log yönlendirmeleri sıfırlandı."))
-        for ev in ("server","member","message","moderation","role","channel","voice","ticket"):
+        for ev in ("server","member","message","moderation","role","channel","voice","ticket","invite","webhook","thread","emoji","sticker","command","bot"):
             db.q("INSERT OR REPLACE INTO log_channels(guild_id,event,channel_id) VALUES(?,?,?)",(ctx.guild.id,ev,ch.id))
         return await rp(ctx,OK("TÜM LOGLAR AYARLANDI","Tüm log türleri "+ch.mention+" kanalına gönderilecek."))
     if ch is None:
@@ -2528,9 +2746,54 @@ async def logayarla(ctx, tur: str, *, hedef: str = None):
 @commands.has_permissions(administrator=True)
 async def loglar(ctx):
     rows=db.all("SELECT * FROM log_channels WHERE guild_id=? ORDER BY event",(ctx.guild.id,)); lines=[]
-    for ev in ("server","member","message","moderation","role","channel","voice","ticket"):
+    for ev in ("server","member","message","moderation","role","channel","voice","ticket","invite","webhook","thread","emoji","sticker","command","bot"):
         r=next((x for x in rows if x["event"]==ev),None); lines.append((e("check") if r and r["channel_id"] else e("cross"))+" **"+LOG_LABELS[ev]+"** → "+("<#"+str(r["channel_id"])+">" if r and r["channel_id"] else "Ayarlanmadı"))
     await rp(ctx,head("log","LOG AYARLARI")+"\n\n"+"\n".join(lines)+tip("Ayarlamak için `k!logayarla <tür> #kanal` • Hepsi için `k!logayarla hepsi #kanal`"))
+
+@kategori("sys")
+@bot.command(name="logtest", aliases=["logtesti"], help="<tür> — seçilen log kanalını test eder")
+@commands.has_permissions(administrator=True)
+async def logtest(ctx, tur: str = "hepsi"):
+    key = LOG_EVENT_KEYS.get(tur.lower(), tur.lower())
+    if key == "all":
+        ok = 0
+        for ev in LOG_LABELS:
+            if await guild_log_send(ctx.guild, head("log", "LOG TEST") + "\n\n" + e("check") + " **" + LOG_LABELS[ev] + "** log kanalı çalışıyor.\nTest eden: " + ctx.author.mention, ev): ok += 1
+        return await rp(ctx, OK("LOG TESTİ TAMAMLANDI", "**" + str(ok) + "** log hedefi test edildi."))
+    if key not in LOG_LABELS: return await rp(ctx, ER("GEÇERSİZ LOG TÜRÜ", "`k!loglar` ile ayarlı türleri görebilirsin."))
+    if await guild_log_send(ctx.guild, head("log", "LOG TEST") + "\n\n" + e("check") + " **" + LOG_LABELS[key] + "** log kanalı çalışıyor.\nTest eden: " + ctx.author.mention, key):
+        return await rp(ctx, OK("LOG ÇALIŞIYOR", LOG_LABELS[key] + " log kanalına test mesajı gönderildi."))
+    await rp(ctx, ER("LOG AYARLI DEĞİL", LOG_LABELS[key] + " için bir kanal ayarlanmamış veya kanala mesaj gönderilemiyor."))
+
+@kategori("sys")
+@bot.command(name="logkapat", help="<tür> — bir log türünü kapatır")
+@commands.has_permissions(administrator=True)
+async def logkapat(ctx, tur: str):
+    key = LOG_EVENT_KEYS.get(tur.lower(), tur.lower())
+    if key not in LOG_LABELS: return await rp(ctx, ER("GEÇERSİZ LOG TÜRÜ", "`k!loglar` ile türleri görebilirsin."))
+    db.q("DELETE FROM log_channels WHERE guild_id=? AND event=?", (ctx.guild.id, key))
+    await rp(ctx, OK("LOG KAPATILDI", LOG_LABELS[key] + " log yönlendirmesi kapatıldı."))
+
+@kategori("sys")
+@bot.command(name="logtemizle", aliases=["logreset"], help="Tüm ayrıntılı log kanallarını sıfırlar")
+@commands.has_permissions(administrator=True)
+async def logtemizle(ctx):
+    db.q("DELETE FROM log_channels WHERE guild_id=?", (ctx.guild.id,))
+    await rp(ctx, OK("LOGLAR SIFIRLANDI", "Ayrıntılı log kanal eşleştirmelerinin tamamı kaldırıldı."))
+
+@kategori("sys")
+@bot.command(name="logdetay", aliases=["logolaylar"], help="Loglanan olayları gösterir")
+@commands.has_permissions(administrator=True)
+async def logdetay(ctx):
+    await rp(ctx, head("log", "FULL LOG KAPSAMI") + "\n\n" +
+             "\n".join(e("check") + " " + x for x in [
+                 "Üye giriş/çıkış, nickname ve rol değişimleri", "Ban / unban / timeout / kick / uyarı / koruma olayları",
+                 "Mesaj silme, düzenleme ve toplu silme", "Rol oluşturma/silme/değiştirme",
+                 "Kanal oluşturma/silme/değiştirme", "Ses kanalına giriş/çıkış/değişim",
+                 "Ticket açma/üstlenme/kapatma", "Davet oluşturma/silme", "Webhook güncellemeleri",
+                 "Thread oluşturma/güncelleme/silme", "Emoji ve sticker değişimleri", "Komut kullanımları",
+                 "Botun sunucuya katılması/ayrılması ve sunucu ayar değişimleri"
+             ]) + tip("Normal sohbet mesajlarının tamamı varsayılan olarak loglanmaz; mesaj silme/düzenleme/toplu silme loglanır."))
 
 @kategori("sys")
 @bot.command(name="sunuculog", help="<#kanal|kapat>")
