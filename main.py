@@ -1,5 +1,5 @@
 # ═══════════════════════════════════════════════════════════════════
-#  💧 KATRE BOT v5.7 — BÖLÜM 1/2 • AI RESİM • ÇEKİLİŞ YÖNETİMİ • PREMIUM KART • V2 TİCKET • V2 YARDIM
+#  💧 KATRE BOT v5.8 — BÖLÜM 1/2 • GELİŞMİŞ TİCKET • SELECT PANEL • PREMIUM KART • V2 YARDIM
 #  ENV: BOT_TOKEN, OWNER_ID, SUPPORT_URL, BACKUP_CHANNEL_ID, OPENAI_API_KEY, OPENAI_IMAGE_MODEL, HF_TOKEN, HF_IMAGE_MODEL, AI_PROVIDER
 #  requirements.txt: discord.py>=2.6.0, aiohttp>=3.9.0, huggingface_hub>=1.1.2
 # ═══════════════════════════════════════════════════════════════════
@@ -50,8 +50,15 @@ BACKUP_CH = int(os.getenv("BACKUP_CHANNEL_ID", "0"))
 MARKER = "#KATRE_YEDEK"
 DIV = "──────────────────────────────"
 PAGE_SIZE = 15
-BOT_VERSION = "5.7"
+BOT_VERSION = "5.8"
 CHANGELOG = {
+    "5.8": [
+        "🧹 `k!resim` kaldırıldı",
+        "🎫 Ticket paneli select menüye geçti; formda öncelik seçimi eklendi",
+        "👮 Ticket üstlenildikten sonra Administrator olmayan diğer yetkililer yazamaz",
+        "⚙️ Ticket yetkili rolleri `k!ticketayar` ile ayarlanabilir",
+        "📢 Ticket açılışında ve üstlenildiğinde bilgilendirme mesajları doğrudan kanala gönderilir",
+    ],
     "5.7": [
         "🆓 Free AI görsel sağlayıcısı eklendi: Hugging Face Inference Providers + FLUX.1-schnell",
         "🤖 `k!resim` artık AI_PROVIDER ile Hugging Face/OpenAI arasında seçim yapabiliyor",
@@ -112,6 +119,7 @@ class DB:
         CREATE TABLE IF NOT EXISTS half_owners(user_id INTEGER PRIMARY KEY, since TEXT, added_by INTEGER);
         CREATE TABLE IF NOT EXISTS giveaways(message_id INTEGER PRIMARY KEY, guild_id INTEGER, channel_id INTEGER, prize TEXT, winners INTEGER, end_time REAL, participants TEXT DEFAULT '[]', status TEXT DEFAULT 'active', host INTEGER);\n        CREATE TABLE IF NOT EXISTS ai_usage(user_id INTEGER NOT NULL, usage_day TEXT NOT NULL, uses INTEGER DEFAULT 0, PRIMARY KEY(user_id, usage_day));
         CREATE TABLE IF NOT EXISTS tickets(channel_id INTEGER PRIMARY KEY, guild_id INTEGER, user_id INTEGER, claimed_by INTEGER, status TEXT DEFAULT 'open');
+        CREATE TABLE IF NOT EXISTS ticket_settings(guild_id INTEGER PRIMARY KEY, staff_roles TEXT DEFAULT '[]', panel_channel INTEGER);
         CREATE TABLE IF NOT EXISTS role_menus(menu_id TEXT PRIMARY KEY, guild_id INTEGER, channel_id INTEGER, message_id INTEGER, title TEXT, role_ids TEXT);
         CREATE TABLE IF NOT EXISTS blacklist(user_id INTEGER PRIMARY KEY, reason TEXT);
         CREATE TABLE IF NOT EXISTS cmd_stats(cmd TEXT PRIMARY KEY, uses INTEGER DEFAULT 0);
@@ -135,7 +143,7 @@ class DB:
         CREATE TABLE IF NOT EXISTS polls(id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id INTEGER, channel_id INTEGER, message_id INTEGER DEFAULT 0, question TEXT, options TEXT, votes TEXT DEFAULT '{}', status TEXT DEFAULT 'active', creator INTEGER, ts TEXT);
         CREATE TABLE IF NOT EXISTS wordgame(guild_id INTEGER PRIMARY KEY, channel_id INTEGER, last_word TEXT, last_user INTEGER, streak INTEGER DEFAULT 0);
         INSERT OR IGNORE INTO owner_settings(id) VALUES (1);""")
-        for t, col, ty in (("users","pro_tag","TEXT"),("users","xp2","INTEGER DEFAULT 0"),("tickets","claimed_by","INTEGER"),("afk","mentions","INTEGER DEFAULT 0"),("tickets","subject","TEXT"),("tickets","category","TEXT"),("tickets","created_at","TEXT"),("tickets","number","INTEGER"),("tickets","description","TEXT"),("role_menus","channel_id","INTEGER"),("role_menus","message_id","INTEGER"),("role_menus","title","TEXT")):
+        for t, col, ty in (("users","pro_tag","TEXT"),("users","xp2","INTEGER DEFAULT 0"),("tickets","claimed_by","INTEGER"),("afk","mentions","INTEGER DEFAULT 0"),("tickets","subject","TEXT"),("tickets","category","TEXT"),("tickets","created_at","TEXT"),("tickets","number","INTEGER"),("tickets","description","TEXT"),("tickets","priority","TEXT DEFAULT 'normal'"),("role_menus","channel_id","INTEGER"),("role_menus","message_id","INTEGER"),("role_menus","title","TEXT")):
             try: c.execute("ALTER TABLE " + t + " ADD COLUMN " + col + " " + ty)
             except sqlite3.OperationalError: pass
         self.conn.commit()
@@ -270,7 +278,7 @@ def sn_txt(sn):
 
 # ─────────────── Açıklayıcı hata yardımcıları ───────────────
 ARG_TR = {"u":"üye","s":"sebep","m":"metin","i":"işlem","ch":"kanal","a":"değer","b":"değer","g":"gün","dk":"dakika","k":"değer","h":"hedef","t2":"sayı","md":"modül","d":"aç/kapat","uid":"kullanıcı-id","role":"rol","ms":"üyeler","rs":"roller","cat":"kategori","süre":"süre","ö":"ödül","arg":"değer","y":"yeni-önek","name":"komut","t":"metin","hedef":"hedef","mod":"aç/kapat","code":"kod","slot":"slot","val":"değer"}
-ARG_OVR = {("çekiliş","s"):"süre",("çekiliş","k"):"kazanan-sayısı",("oylama","s"):"soru | seçenek1 | seçenek2",("8ball","s"):"soru",("seç","s"):"seçenekler",("tahmin","s"):"sayı(1-10)",("yavaşmod","s"):"saniye",("seviyerol","s"):"seviye",("transfer","m"):"miktar",("bahis","m"):"miktar",("çekilişbitir","m"):"mesaj-id",("raidmodu","m"):"aç/kapat",("temizle","a"):"adet",("ceza-sistemi","a"):"mute-uyarı-sayısı",("ceza-sistemi","b"):"ban-uyarı-sayısı",("proembed","a"):"başlık | mesaj | renk",("otocevap","a"):"tetik | cevap",("doğumgünü","a"):"ay",("sayaç","h"):"hedef-üye",("prorenk","h"):"hex-renk",("badword","k"):"kelime",("şanslı","t2"):"sayı(1-100)",("koruma","d"):"aç/kapat",("ticket","i"):"kapat/bilgi/listele",("hatırlat","m"):"mesaj",("resim","prompt"):"prompt",("çekilişdüzenle","s"):"süre",("çekilişdüzenle","k"):"kazanan-sayısı",("çekilişdüzenle","ö"):"ödül",("çekilişbitir","m"):"mesaj-id",("çekilişiptal","m"):"mesaj-id",("çekilişyenile","m"):"mesaj-id"}
+ARG_OVR = {("çekiliş","s"):"süre",("çekiliş","k"):"kazanan-sayısı",("oylama","s"):"soru | seçenek1 | seçenek2",("8ball","s"):"soru",("seç","s"):"seçenekler",("tahmin","s"):"sayı(1-10)",("yavaşmod","s"):"saniye",("seviyerol","s"):"seviye",("transfer","m"):"miktar",("bahis","m"):"miktar",("çekilişbitir","m"):"mesaj-id",("raidmodu","m"):"aç/kapat",("temizle","a"):"adet",("ceza-sistemi","a"):"mute-uyarı-sayısı",("ceza-sistemi","b"):"ban-uyarı-sayısı",("proembed","a"):"başlık | mesaj | renk",("otocevap","a"):"tetik | cevap",("doğumgünü","a"):"ay",("sayaç","h"):"hedef-üye",("prorenk","h"):"hex-renk",("badword","k"):"kelime",("şanslı","t2"):"sayı(1-100)",("koruma","d"):"aç/kapat",("ticket","i"):"kapat/bilgi/listele",("hatırlat","m"):"mesaj",("çekilişdüzenle","s"):"süre",("çekilişdüzenle","k"):"kazanan-sayısı",("çekilişdüzenle","ö"):"ödül",("çekilişbitir","m"):"mesaj-id",("çekilişiptal","m"):"mesaj-id",("çekilişyenile","m"):"mesaj-id"}
 def pf(ctx):
     try: return ctx.clean_prefix or "k!"
     except Exception: return "k!"
@@ -456,7 +464,7 @@ async def guild_log_send(g, t):
             try: await rp_ch(ch, t); return True
             except Exception: pass
     return False
-VERSION_TAGLINE = {"5.7": "Free AI API • gelişmiş butonrol sistemi • kalıcı rol panelleri", "5.6": "AI resim • Free 7/gün • Pro sınırsız • gelişmiş çekiliş yönetimi", "5.5": "Yardım menüsü düzeltmesi • avatarlı kartlar • 6 yeni komut", "5.4": "Premium kartlar • V2 ticket • yeni yardım menüsü", "5.3": "Açıklayıcı hatalar • TDK kelime oyunu", "5.2": "Duyuru sistemi • V2 yardım"}
+VERSION_TAGLINE = {"5.8": "Gelişmiş ticket • select panel • öncelik • yetkili kilidi", "5.7": "Free AI API • gelişmiş butonrol sistemi • kalıcı rol panelleri", "5.6": "AI resim • Free 7/gün • Pro sınırsız • gelişmiş çekiliş yönetimi", "5.5": "Yardım menüsü düzeltmesi • avatarlı kartlar • 6 yeni komut", "5.4": "Premium kartlar • V2 ticket • yeni yardım menüsü", "5.3": "Açıklayıcı hatalar • TDK kelime oyunu", "5.2": "Duyuru sistemi • V2 yardım"}
 def update_text(ver, prev=None):
     L = [e("party") + " **KATRE v" + ver + " YAYINDA!**", DIV, e("spark") + " " + VERSION_TAGLINE.get(ver, "Yeni sürüm yayında")]
     ns = CHANGELOG.get(ver, [])
@@ -660,13 +668,13 @@ def kategori(a):
     return d
 
 CATS = {"genel":("genel","Genel & Sistem"),"mod":("mod","Moderasyon & Koruma"),"sys":("sys","Başvuru & Otomasyon"),"eco":("eco","Ekonomi"),"fun":("fun","Eğlence"),"give":("give","Çekiliş"),"pro":("pro","Pro"),"owner":("owner","Owner")}
-CAT_DESC = {"genel":"Rank, profil, avatar, snipe, AFK, oda, AI resim","mod":"Ban, kick, unban, mute, uyarı, oto-ceza, koruma, butonrol","sys":"Başvuru, ticket, temp voice, kelime oyunu, log","eco":"Coin, günlük, çalışma, balık, maden, market","fun":"Quiz, slot, aşk, anket ve oyunlar","give":"Butonlu çekiliş, reroll, sonuç paneli","pro":"Pro oda, rol, bonus, banner, şans","owner":"Owner + Half Owner paneli, duyuru"}
+CAT_DESC = {"genel":"Rank, profil, avatar, snipe, AFK, oda","mod":"Ban, kick, unban, mute, uyarı, oto-ceza, koruma, butonrol","sys":"Başvuru, ticket, temp voice, kelime oyunu, log","eco":"Coin, günlük, çalışma, balık, maden, market","fun":"Quiz, slot, aşk, anket ve oyunlar","give":"Butonlu çekiliş, reroll, sonuç paneli","pro":"Pro oda, rol, bonus, banner, şans","owner":"Owner + Half Owner paneli, duyuru"}
 def cat_count(b, k): return len([c for c in b.commands if getattr(c, "kategori", None) == k])
 HELP_COLORS = {"genel":0x5865F2,"mod":0xE67E22,"sys":0x1ABC9C,"eco":0xF1C40F,"fun":0x9B59B6,"give":0xEB459E,"pro":0x00D9FF,"owner":0xFEE75C}
 HELP_TIPS = ["`k!günlük` ile her gün ücretsiz coin topla.", "`k!rank` ile seviyeni ve sıralamanı gör.", "`k!destek` paneliyle sunucunda ticket sistemi kurabilirsin.",
     "`k!afk <sebep>` yazınca seni etiketleyenlere sebebi gösteririm.", "`k!oylama soru | seçenek1 | seçenek2` ile hızlı anket aç.", "`k!hesapla 12*(3+4)` ile hızlı hesap yap.",
     "`k!komutbilgi <komut>` ile bir komutun kullanımını öğren.", "`k!çekiliş` ile butonlu çekiliş başlatabilirsin.", "`k!kullanıcıbilgi @üye` ile üye hakkında detaylı bilgi al.",
-    "`k!sarıl @üye` ile birine sıcak bir sarılma gönder.", "`k!resim <prompt>` ile AI görsel oluştur. Free günlük 7, Pro sınırsız. `k!butonrol` ile rol butonları oluştur."]
+    "`k!sarıl @üye` ile birine sıcak bir sarılma gönder.", "`k!butonrol` ile rol butonları oluştur. `k!destek` ile ticket panelini aç."]
 def help_content(bot):
     L = ["## " + e("logo") + " " + bot.user.name.upper() + " • YARDIM MERKEZİ", DIV,
          "Selam! Ben **" + bot.user.name + "** " + e("spark") + " — moderasyon, ekonomi, eğlence, ticket ve çok daha fazlası tek botta.", "",
@@ -968,16 +976,31 @@ class RoleMenuPanel(Panel):
             self.btn(nm[:80], cb, style=style, emoji="🎭", cid="kr_" + self.mid + "_" + str(rid), row=i // 5)
 
 # ═══════════════════════════════════════════════════════════════════
-# 🎫 TİCKET SİSTEMİ v5.4 (V2 kart panel • talep türleri • transkript)
+# 🎫 TİCKET SİSTEMİ v5.8 (select panel • öncelik • üstlenen yetkili kilidi)
 # ═══════════════════════════════════════════════════════════════════
 TICKET_CATS = {"destek": ("🛠️", "Genel Destek", 0x5865F2), "sikayet": ("🚨", "Şikayet", 0xED4245), "oneri": ("💡", "Öneri", 0xFEE75C), "ortaklik": ("🤝", "Ortaklık", 0x57F287)}
+TICKET_PRIORITIES = {"dusuk": ("🟢", "Düşük"), "normal": ("🔵", "Normal"), "yuksek": ("🟠", "Yüksek"), "acil": ("🔴", "Acil")}
 def _tcat(k): return TICKET_CATS.get(k or "destek", TICKET_CATS["destek"])
 def _safe(s): return str(s).replace("@", "@\u200b")
+def _priority_key(v):
+    x = (v or "normal").lower().strip().replace("ü","u").replace("ş","s").replace("ı","i").replace("ö","o").replace("ç","c").replace("ğ","g")
+    return x if x in TICKET_PRIORITIES else "normal"
+def _priority_text(v):
+    k = _priority_key(v); em, nm = TICKET_PRIORITIES[k]; return em + " " + nm
+def _ticket_staff_roles(guild):
+    st = db.one("SELECT staff_roles FROM ticket_settings WHERE guild_id=?", (guild.id,))
+    ids = json.loads(st["staff_roles"] or "[]") if st else []
+    return [guild.get_role(int(x)) for x in ids if guild.get_role(int(x))]
+def _ticket_is_admin(m):
+    return bool(m and (m.id == OWNER_ID or m.guild_permissions.administrator))
 def _ticket_is_staff(it):
     m = it.user
-    if m.id == OWNER_ID or m.guild_permissions.administrator or m.guild_permissions.manage_messages: return True
-    st = db.one("SELECT staff_role FROM app_settings WHERE guild_id=?", (it.guild.id,))
-    return bool(st and st["staff_role"] and any(r.id == st["staff_role"] for r in m.roles))
+    if _ticket_is_admin(m): return True
+    roles = _ticket_staff_roles(it.guild)
+    return any(r.id in [x.id for x in m.roles] for r in roles)
+def _ticket_can_manage(t, m):
+    if _ticket_is_admin(m): return True
+    return bool(t and t.get("claimed_by") == m.id)
 def ticket_text(t):
     em, nm, _ = _tcat(t.get("category"))
     if t["status"] != "open": durum = "🔴 Kapalı"
@@ -986,11 +1009,12 @@ def ticket_text(t):
     try: ts = int(datetime.datetime.fromisoformat(t["created_at"]).timestamp())
     except Exception: ts = int(time.time())
     num = str(t.get("number") or 0).zfill(4) if t.get("number") else "—"
-    ps = [(e("dot") + "Açan", "<@" + str(t["user_id"]) + ">"), (em + " Tür", nm), (e("clip") + "Konu", _safe(t.get("subject") or "—")),
-          (e("alarm") + "Açılış", "<t:" + str(ts) + ":R>"), (e("shield") + "Yetkili", ("<@" + str(t["claimed_by"]) + ">") if t.get("claimed_by") else "Henüz üstlenilmedi"), (e("info") + "Durum", durum)]
+    ps = [(e("dot") + "Açan", "<@" + str(t["user_id"]) + ">"), (em + " Tür", nm), (e("alarm") + "Öncelik", _priority_text(t.get("priority"))),
+          (e("clip") + "Konu", _safe(t.get("subject") or "—")), (e("alarm") + "Açılış", "<t:" + str(ts) + ":R>"),
+          (e("shield") + "Yetkili", ("<@" + str(t["claimed_by"]) + ">") if t.get("claimed_by") else "Henüz üstlenilmedi"), (e("info") + "Durum", durum)]
     return head("ticket", "TALEP #" + num + " • " + nm.upper()) + "\n\n" + KV(ps) + "\n\n**" + e("pen") + " Açıklama**\n" + _q(_safe(t.get("description") or "—")[:900])
 async def ticket_transcript(ch, t):
-    L = ["KATRE BOT • TALEP KAYDI", "Talep: #" + str(t.get("number") or "?") + " • Kanal: #" + ch.name, "Konu: " + str(t.get("subject") or "—"), "=" * 50, ""]
+    L = ["KATRE BOT • TALEP KAYDI", "Talep: #" + str(t.get("number") or "?") + " • Kanal: " + ch.name, "Konu: " + str(t.get("subject") or "—"), "Öncelik: " + _priority_text(t.get("priority")), "=" * 50, ""]
     try:
         async for m in ch.history(limit=1000, oldest_first=True):
             if m.author.bot and not m.content: continue
@@ -1001,119 +1025,132 @@ async def ticket_transcript(ch, t):
 async def ticket_finish(guild, ch, t, closer):
     db.q("UPDATE tickets SET status='closed' WHERE channel_id=?", (ch.id,)); t["status"] = "closed"
     data = await ticket_transcript(ch, t); num = str(t.get("number") or ch.id); fn = "talep-" + num + ".txt"
-    r = db.one("SELECT channel_id FROM guild_logs WHERE guild_id=?", (guild.id,))
-    lc = guild.get_channel(r["channel_id"]) if r and r["channel_id"] else None
+    r = db.one("SELECT channel_id FROM guild_logs WHERE guild_id=?", (guild.id,)); lc = guild.get_channel(r["channel_id"]) if r and r["channel_id"] else None
     if lc:
         try: await lc.send("🎫 **Talep #" + num + " kapandı** • Açan: <@" + str(t["user_id"]) + "> • Kapatan: " + closer.mention, file=discord.File(io.BytesIO(data), filename=fn), allowed_mentions=discord.AllowedMentions.none())
         except Exception: pass
     u = guild.get_member(t["user_id"])
     if u:
-        try: await u.send(OK("TALEBİN KAPATILDI", "**" + guild.name + "** sunucusundaki talebin (#" + num + ") kapatıldı.\nKonuşma kaydı ekte. Başka bir sorunun olursa yeni talep açabilirsin. 💧"), file=discord.File(io.BytesIO(data), filename=fn))
+        try: await u.send(OK("TALEBİN KAPATILDI", "**" + guild.name + "** sunucusundaki talebin (#" + num + ") kapatıldı.\nKonuşma kaydı ekte."), file=discord.File(io.BytesIO(data), filename=fn))
         except Exception: pass
-
+async def _ticket_apply_permissions(ch, t, guild):
+    roles = _ticket_staff_roles(guild)
+    for r in roles:
+        try: await ch.set_permissions(r, view_channel=True, send_messages=not t.get("claimed_by"), read_message_history=True)
+        except Exception: pass
+    if t.get("claimed_by"):
+        m = guild.get_member(t["claimed_by"])
+        if m:
+            try: await ch.set_permissions(m, view_channel=True, send_messages=True, attach_files=True, read_message_history=True)
+            except Exception: pass
 async def tk_claim(it):
     t = db.one("SELECT * FROM tickets WHERE channel_id=?", (it.channel.id,))
     if not t: return await sendv_eph(it, ER("TALEP BULUNAMADI", "Bu kanal kayıtlı bir destek talebi değil."))
-    if not _ticket_is_staff(it): return await sendv_eph(it, ER("YETKİN YOK", "Talepleri sadece yetkililer üstlenebilir."))
-    if t.get("claimed_by"): return await sendv_eph(it, WN("ZATEN ÜSTLENİLMİŞ", "Bu talebi <@" + str(t["claimed_by"]) + "> zaten üstlenmiş."))
+    if not _ticket_is_staff(it): return await sendv_eph(it, ER("YETKİN YOK", "Bu ticketı yalnızca ayarlanmış destek yetkilileri üstlenebilir."))
+    if t.get("claimed_by"):
+        if t["claimed_by"] == it.user.id: return await sendv_eph(it, WN("ZATEN ÜSTLENDİN", "Bu ticket zaten senin üzerinde."))
+        return await sendv_eph(it, WN("ZATEN ÜSTLENİLMİŞ", "Bu talebi <@" + str(t["claimed_by"]) + "> üstlenmiş."))
     db.q("UPDATE tickets SET claimed_by=? WHERE channel_id=?", (it.user.id, it.channel.id)); t["claimed_by"] = it.user.id
+    await _ticket_apply_permissions(it.channel, t, it.guild)
     try: await it.response.edit_message(view=ticket_view_v2(t))
-    except Exception:
-        try: await it.response.edit_message(content=ticket_text(t), view=TicketPanel(ticket_text(t)))
-        except Exception:
-            try: await it.response.defer()
-            except Exception: pass
-    await rp_ch(it.channel, OK("TALEP ÜSTLENİLDİ", it.user.mention + " bu talebe bakacak. Sorununu ona anlatabilirsin. 👮"))
+    except Exception: pass
+    await rp_ch(it.channel, OK("🎫 TICKET ÜSTLENİLDİ", it.user.mention + " bu ticketı **üstlendi**.\n🔒 Administrator olmayan diğer yetkililer artık bu kanala mesaj yazamaz.\n🛠️ Ticket işlemleri için `k!ticket bilgi`, `k!ticket ekle @üye`, `k!ticket çıkar @üye` ve `k!ticket kapat` komutlarını kullanabilirsin."))
 async def tk_trans(it):
     t = db.one("SELECT * FROM tickets WHERE channel_id=?", (it.channel.id,))
     if not t: return await sendv_eph(it, ER("TALEP BULUNAMADI", "Bu kanal kayıtlı bir destek talebi değil."))
-    if not (_ticket_is_staff(it) or it.user.id == t["user_id"]): return await sendv_eph(it, ER("YETKİN YOK", "Transkripti sadece talep sahibi ve yetkililer alabilir."))
-    await it.response.defer(ephemeral=True)
-    data = await ticket_transcript(it.channel, t)
-    try: await it.followup.send("🧾 **Transkript hazır** • Konuşma kaydı ekte.", file=discord.File(io.BytesIO(data), filename="talep-" + str(t.get("number") or it.channel.id) + ".txt"), ephemeral=True)
+    if not (_ticket_is_admin(it.user) or _ticket_can_manage(t, it.user) or it.user.id == t["user_id"]): return await sendv_eph(it, ER("YETKİN YOK", "Transkripti ticket sahibi, ticketı üstlenen yetkili veya Administrator alabilir."))
+    await it.response.defer(ephemeral=True); data = await ticket_transcript(it.channel, t)
+    try: await it.followup.send("🧾 **Transkript hazır**", file=discord.File(io.BytesIO(data), filename="talep-" + str(t.get("number") or it.channel.id) + ".txt"), ephemeral=True)
     except Exception as ex: await sendf_eph(it, ER("TRANSKRİPT HATASI", str(ex)[:150]))
 async def tk_close(it):
     t = db.one("SELECT * FROM tickets WHERE channel_id=?", (it.channel.id,))
     if not t: return await sendv_eph(it, ER("TALEP BULUNAMADI", "Bu kanal kayıtlı bir destek talebi değil."))
-    if not (_ticket_is_staff(it) or it.user.id == t["user_id"]): return await sendv_eph(it, ER("YETKİN YOK", "Talebi sadece talep sahibi veya yetkililer kapatabilir."))
-    await sendv_eph(it, WN("TALEP KAPATILIYOR", "Transkript hazırlanıyor, kanal **10 saniye** içinde silinecek. 🧾"))
+    if not (_ticket_is_admin(it.user) or _ticket_can_manage(t, it.user) or it.user.id == t["user_id"]): return await sendv_eph(it, ER("YETKİN YOK", "Talebi sadece ticket sahibi, üstlenen yetkili veya Administrator kapatabilir."))
+    await sendv_eph(it, WN("TALEP KAPATILIYOR", "Transkript hazırlanıyor, kanal **10 saniye** içinde silinecek."))
     try: await it.message.edit(view=ticket_view_v2(dict(t, status="closed"), closed=True))
     except Exception: pass
     await ticket_finish(it.guild, it.channel, t, it.user); await asyncio.sleep(10)
     try: await it.channel.delete(reason="Talep kapatıldı")
     except Exception: pass
 async def tk_mine(it):
-    t = db.one("SELECT * FROM tickets WHERE guild_id=? AND user_id=? AND status='open'", (it.guild.id, it.user.id))
+    t = db.one("SELECT * FROM tickets WHERE guild_id=? AND user_id=? AND status='open'", (it.guild.id, it.user.id,))
     if t: await sendv_eph(it, OK("AÇIK TALEBİN VAR", "Talep kanalın: <#" + str(t["channel_id"]) + ">\nDurum: " + ("🟡 Üstlenildi" if t.get("claimed_by") else "🟢 Yetkili bekleniyor")))
-    else: await sendv_eph(it, WN("AÇIK TALEBİN YOK", "Şu an açık bir destek talebin bulunmuyor.\nYeni talep için paneldeki butonlardan bir tür seçebilirsin."))
+    else: await sendv_eph(it, WN("AÇIK TALEBİN YOK", "Şu an açık bir destek talebin bulunmuyor."))
 def _tcat_cb(key):
     async def cb(it): await it.response.send_modal(TicketModal(key))
     return cb
-
+class TicketPriorityView(View):
+    def __init__(self, cat):
+        super().__init__(timeout=120)
+        self.cat = cat
+        self.add_item(TicketPrioritySelect(cat))
+class TicketPrioritySelect(Select):
+    def __init__(self, cat):
+        self.cat = cat
+        super().__init__(placeholder="⚡ Öncelik seç...", min_values=1, max_values=1, options=[discord.SelectOption(label=nm, value=k, emoji=em) for k,(em,nm) in TICKET_PRIORITIES.items()])
+    async def callback(self, it):
+        await it.response.send_modal(TicketModal(self.cat, self.values[0]))
+class TicketCategorySelect(Select):
+    def __init__(self):
+        super().__init__(placeholder="🎫 Ticket türünü seç...", min_values=1, max_values=1, custom_id="ticket_category_select", options=[discord.SelectOption(label=nm, value=k, emoji=em, description=("Yeni " + nm.lower() + " talebi oluştur")) for k,(em,nm,_) in TICKET_CATS.items()])
+    async def callback(self, it):
+        await it.response.send_message("⚡ **Ticket önceliğini seç:**", view=TicketPriorityView(self.values[0]), ephemeral=True)
 def ticket_view_v2(t=None, closed=False):
     if t: col = _tcat(t.get("category"))[2]; text = ticket_text(t)
     else: col = 0x1ABC9C; text = head("ticket", "TALEP")
     rows = []
     if not closed:
-        rows.append(_row(mkbtn("Üstlen", tk_claim, discord.ButtonStyle.success, "👮", "kt2_claim"),
-                         mkbtn("Transkript", tk_trans, discord.ButtonStyle.secondary, e("log"), "kt2_trans"),
-                         mkbtn("Kapat", tk_close, discord.ButtonStyle.danger, e("lock"), "kt2_close")))
+        rows.append(_row(mkbtn("Üstlen", tk_claim, discord.ButtonStyle.success, "👮", "kt2_claim"), mkbtn("Transkript", tk_trans, discord.ButtonStyle.secondary, e("log"), "kt2_trans"), mkbtn("Kapat", tk_close, discord.ButtonStyle.danger, e("lock"), "kt2_close")))
     return card_view(text, rows, accent=col)
 def ticket_open_v2(guild=None):
-    text = (head("ticket", "DESTEK MERKEZİ") + "\n\nBir sorunun, şikayetin ya da önerin mi var? Aşağıdan **talep türünü** seç ve formu doldur; sana özel bir kanal açılır, yetkililer orada yardımcı olur.\n\n"
-            "**Nasıl çalışır?**\n`1` Talep türünü seç\n`2` Formu doldur\n`3` Özel kanalında yetkililerle konuş\n`4` Çözülünce talebi kapat — konuşma kaydı DM'ine gelir\n\n"
-            "-# " + e("info") + " Aynı anda yalnızca **1 açık talep** açabilirsin.")
-    btns = [mkbtn(nm, _tcat_cb(k), discord.ButtonStyle.primary if k == "destek" else discord.ButtonStyle.secondary, em, "kt2_open_" + k) for k, (em, nm, _) in TICKET_CATS.items()]
-    btns.append(mkbtn("Talebim", tk_mine, discord.ButtonStyle.secondary, e("search"), "kt2_mine"))
-    return card_view(text, [_row(*btns)], accent=0x1ABC9C)
-
+    text = (head("ticket", "DESTEK MERKEZİ") + "\n\nAşağıdaki menüden destek türünü seç. Form açılacak; konu, açıklama ve **öncelik** bilgilerini doldurduğunda sana özel ticket açılacak.\n\n" + e("info") + " Aynı anda yalnızca **1 açık** ticket açabilirsin.")
+    con = Container() if V2_OK and Container else None
+    if con is not None:
+        con.add_item(TextDisplay(text))
+        _sep(con, False); con.add_item(_row(TicketCategorySelect()))
+        return con
+    return TicketOpenPanel(text)
 class TicketModal(Modal, title="Destek Talebi"):
     konu = TextInput(label="Konu", max_length=100, placeholder="Sorununu kısaca yaz")
     acik = TextInput(label="Açıklama", style=discord.TextStyle.paragraph, max_length=900, placeholder="Detayları ve ne beklediğini anlat...")
-    def __init__(self, cat="destek"):
-        super().__init__(title=(_tcat(cat)[1] + " Talebi")[:45]); self.cat = cat
+    def __init__(self, cat="destek", priority="normal"):
+        super().__init__(title=(_tcat(cat)[1] + " Talebi")[:45]); self.cat = cat; self.priority = _priority_key(priority)
     async def on_submit(self, it):
         g = it.guild
         if not g: return
         await it.response.defer(ephemeral=True)
         ex = db.one("SELECT channel_id FROM tickets WHERE guild_id=? AND user_id=? AND status='open'", (g.id, it.user.id))
-        if ex: return await sendf_eph(it, ER("AÇIK TALEBİN VAR", "Zaten açık bir talebin var: <#" + str(ex["channel_id"]) + ">\nYeni talep açmadan önce onu kapatmalısın."))
-        em, nm, _ = _tcat(self.cat)
-        num = db.one("SELECT COUNT(*) c FROM tickets WHERE guild_id=?", (g.id,))["c"] + 1
+        if ex: return await sendf_eph(it, ER("AÇIK TİCKETIN VAR", "Zaten açık ticketın var: <#" + str(ex["channel_id"]) + ">"))
+        em, nm, _ = _tcat(self.cat); priority = self.priority
+        num = db.one("SELECT COALESCE(MAX(number),0) c FROM tickets WHERE guild_id=?", (g.id,))["c"] + 1
         cat = discord.utils.get(g.categories, name="DESTEK")
         if not cat:
             try: cat = await g.create_category("DESTEK")
-            except Exception as e2: return await sendf_eph(it, ER("KATEGORİ OLUŞTURULAMADI", "Botun **Kanalları Yönet** yetkisi olmalı.\n`" + str(e2)[:120] + "`"))
-        st = db.one("SELECT staff_role FROM app_settings WHERE guild_id=?", (g.id,)); role = g.get_role(st["staff_role"]) if st and st["staff_role"] else None
-        ow = {g.default_role: discord.PermissionOverwrite(view_channel=False),
-              it.user: discord.PermissionOverwrite(view_channel=True, send_messages=True, attach_files=True, read_message_history=True),
-              g.me: discord.PermissionOverwrite(view_channel=True, send_messages=True, manage_channels=True, manage_messages=True, read_message_history=True)}
-        if role: ow[role] = discord.PermissionOverwrite(view_channel=True, send_messages=True, attach_files=True, read_message_history=True, manage_messages=True)
+            except Exception as e2: return await sendf_eph(it, ER("KATEGORİ OLUŞTURULAMADI", "Botun Kanalları Yönet yetkisi olmalı.\n`" + str(e2)[:120] + "`"))
+        roles = _ticket_staff_roles(g)
+        if not roles: return await sendf_eph(it, ER("TICKET YETKİLİLERİ AYARLANMADI", "Önce Administrator `k!ticketayar @YetkiliRol` ile ticket yetkili rolünü ayarlamalı."))
+        ow = {g.default_role: discord.PermissionOverwrite(view_channel=False), it.user: discord.PermissionOverwrite(view_channel=True, send_messages=True, attach_files=True, read_message_history=True), g.me: discord.PermissionOverwrite(view_channel=True, send_messages=True, manage_channels=True, manage_messages=True, read_message_history=True)}
+        for role in roles: ow[role] = discord.PermissionOverwrite(view_channel=True, send_messages=True, attach_files=True, read_message_history=True)
         try: ch = await g.create_text_channel(self.cat + "-" + str(num).zfill(4), category=cat, overwrites=ow, topic=nm + " • " + str(it.user) + " • #" + str(num), reason="Destek talebi")
         except Exception as e2: return await sendf_eph(it, ER("KANAL AÇILAMADI", "Talep kanalı oluşturulamadı.\n`" + str(e2)[:150] + "`"))
-        db.q("INSERT INTO tickets(channel_id,guild_id,user_id,subject,category,created_at,number,description) VALUES(?,?,?,?,?,?,?,?)",
-             (ch.id, g.id, it.user.id, self.konu.value[:100], self.cat, datetime.datetime.now().isoformat(), num, self.acik.value[:900]))
+        db.q("INSERT INTO tickets(channel_id,guild_id,user_id,subject,category,created_at,number,description,priority) VALUES(?,?,?,?,?,?,?,?,?)", (ch.id, g.id, it.user.id, self.konu.value[:100], self.cat, datetime.datetime.now().isoformat(), num, self.acik.value[:900], priority))
         t = db.one("SELECT * FROM tickets WHERE channel_id=?", (ch.id,))
-        try: await ch.send(it.user.mention + ((" " + role.mention) if role else ""), allowed_mentions=discord.AllowedMentions(users=True, roles=True))
-        except Exception: pass
-        sent = False
-        if V2_OK:
-            try: await ch.send(view=ticket_view_v2(t)); sent = True
-            except Exception: traceback.print_exc()
-        if not sent: await rp_ch(ch, ticket_text(t) + "\n\n" + e("info") + " Yetkililer birazdan burada.", TicketPanel(" "))
-        await sendf_eph(it, OK("TALEBİN OLUŞTURULDU", "Özel destek kanalın hazır: " + ch.mention + "\nSorununu orada anlatabilirsin, yetkililer en kısa sürede yardımcı olur. 🎫"))
+        mentions = it.user.mention + " " + " ".join(r.mention for r in roles)
+        await ch.send(mentions, allowed_mentions=discord.AllowedMentions(users=True, roles=True))
+        await ch.send(OK("🎫 YENİ TICKET", it.user.mention + " tarafından yeni bir **" + nm + "** ticket açıldı.\n" + _priority_text(priority) + " **Öncelik**\n\nYetkili ekipten bir kişi **Üstlen** butonuna basmalıdır.\nÜstlenildikten sonra Administrator olmayan diğer yetkililer yazamaz."), allowed_mentions=discord.AllowedMentions(users=True, roles=True))
+        await ch.send(ticket_text(t), view=ticket_view_v2(t))
+        await ch.send("-# `k!ticket bilgi` • `k!ticket ekle @üye` • `k!ticket çıkar @üye` • `k!ticket kapat`")
+        await sendf_eph(it, OK("TİCKET OLUŞTURULDU", "Özel ticket kanalın hazır: " + ch.mention + "\nÖncelik: **" + TICKET_PRIORITIES[priority][1] + "**"))
 class TicketOpenPanel(Panel):
     def __init__(self, text):
         super().__init__(text, timeout=None)
-        async def o(it): await it.response.send_modal(TicketModal())
-        self.btn("Talep Oluştur", o, emoji=e("ticket"), cid="kt_open", row=0)
-        self.btn("Talebim Var mı?", tk_mine, style=discord.ButtonStyle.secondary, emoji=e("search"), cid="kt_mine", row=0)
+        self.add_item(TicketCategorySelect())
 class TicketPanel(Panel):
     def __init__(self, text):
         super().__init__(text, timeout=None)
-        self.btn("Üstlendim", tk_claim, emoji="👮", cid="kt_claim", row=0)
-        self.btn("Transkript", tk_trans, style=discord.ButtonStyle.secondary, emoji=e("log"), cid="kt_trans", row=0)
-        self.btn("Kapat", tk_close, style=discord.ButtonStyle.danger, emoji=e("lock"), cid="kt_close", row=0)
+        self.btn("Üstlen", tk_claim, emoji="👮", cid="kt_claim")
+        self.btn("Transkript", tk_trans, style=discord.ButtonStyle.secondary, emoji=e("log"), cid="kt_trans")
+        self.btn("Kapat", tk_close, style=discord.ButtonStyle.danger, emoji=e("lock"), cid="kt_close")
 
 class AppOpenPanel(Panel):
     def __init__(self, text):
@@ -1651,7 +1688,7 @@ async def finalize_giveaway(bot, mid):
 bot = KatreBot()
 
 # ═══════════════════════════════════════════════════════════════════
-#  💧 BÖLÜM 2/2 — KOMUTLAR (v5.6 • AI resim • çekiliş yönetimi • dengeli, açıklayıcı cevaplar)
+#  💧 BÖLÜM 2/2 — KOMUTLAR (v5.8 • gelişmiş ticket • çekiliş yönetimi • dengeli, açıklayıcı cevaplar)
 # ═══════════════════════════════════════════════════════════════════
 def tip(t): return "\n💡 *" + t + "*"
 def medal(i): return ["🥇", "🥈", "🥉"][i] if i < 3 else "**" + str(i + 1) + ".**"
@@ -1794,17 +1831,29 @@ async def rep(ctx, u: discord.Member):
     ensure_user(u.id, str(u)); db.q("UPDATE users SET rep=rep+1 WHERE user_id=?", (u.id,))
     await rp(ctx, OK("İTİBAR VERİLDİ", u.mention + " üyesine **+1 itibar** verdin." + tip("12 saatte bir itibar verebilirsin.")))
 @kategori("genel")
-@bot.command(name="destek", aliases=["ticketpanel"], help="Destek paneli")
+@bot.command(name="destek", aliases=["ticketpanel"], help="Select menülü ticket paneli")
 @commands.has_permissions(administrator=True)
 async def destek(ctx):
-    sent = False
-    if V2_OK:
-        try: await ctx.send(view=ticket_open_v2(ctx.guild)); sent = True
-        except Exception: traceback.print_exc()
-    if not sent:
-        t = head("ticket", "DESTEK MERKEZİ") + "\n\nSorunun veya önerin mi var? Aşağıdaki butona basıp formu doldur; sana özel bir destek kanalı açılır ve yetkililer orada yardımcı olur."; await rp(ctx, t, TicketOpenPanel(t))
+    await ctx.send(view=ticket_open_v2(ctx.guild))
     try: await ctx.message.delete()
     except Exception: pass
+@kategori("sys")
+@bot.command(name="ticketayar", aliases=["ticket-yetkili"], help="[@rol...] — Ticket yetkili rollerini ayarla")
+@commands.has_permissions(administrator=True)
+async def ticketayar(ctx, *roles: discord.Role):
+    if not roles:
+        return await rp(ctx, ER("ROL EKSİK", "En az bir yetkili rolü belirtmelisin.\nÖrnek: `k!ticketayar @Destek @Mod`"))
+    roles = list({r.id:r for r in roles}.values())[:10]
+    me = ctx.guild.me
+    bad = [r for r in roles if r.is_default() or r.managed or (me and r >= me.top_role)]
+    if bad: return await rp(ctx, ER("ROL HİYERARŞİSİ", "Botun yönetemeyeceği roller: " + ", ".join(r.name for r in bad[:10]) + "."))
+    db.q("INSERT OR REPLACE INTO ticket_settings(guild_id,staff_roles,panel_channel) VALUES(?,?,COALESCE((SELECT panel_channel FROM ticket_settings WHERE guild_id=?),NULL))", (ctx.guild.id, json.dumps([r.id for r in roles]), ctx.guild.id))
+    await rp(ctx, OK("TICKET YETKİLİLERİ AYARLANDI", "Ticketlara bakabilecek roller:\n" + " ".join(r.mention for r in roles) + "\n\nÜstlenilmiş ticketlarda Administrator olmayan diğer yetkililer mesaj yazamaz."))
+@kategori("sys")
+@bot.command(name="ticketdurum", help="Ticket yetkili ayarını göster")
+async def ticketdurum(ctx):
+    roles = _ticket_staff_roles(ctx.guild)
+    await rp(ctx, head("ticket", "TICKET AYARLARI") + "\n\nYetkili roller: " + (", ".join(r.mention for r in roles) if roles else "Ayarlanmadı") + "\n\nKural: Ticket üstlenilince sadece **üstlenen yetkili** ve **Administrator** mesaj yazabilir.")
 @kategori("genel")
 @bot.command(name="not", help="<metin>")
 async def not_(ctx, *, m):
@@ -2219,32 +2268,29 @@ async def tempvoice(ctx, *, arg=None):
 @bot.command(name="ticket", help="<kapat/bilgi/listele/ekle/çıkar>")
 async def ticket(ctx, i: str = "bilgi", u: discord.Member = None):
     i = i.lower(); t = db.one("SELECT * FROM tickets WHERE channel_id=?", (ctx.channel.id,))
-    pm = ctx.author.guild_permissions; staff = pm.administrator or pm.manage_messages or ctx.author.id == OWNER_ID
     if i in ("kapat", "close"):
         if not t: return await rp(ctx, ER("BURASI BİR TİCKET DEĞİL", "Bu komut sadece destek talebi kanalında çalışır."))
-        if not (staff or ctx.author.id == t["user_id"]): return await rp(ctx, ER("YETKİN YOK", "Talebi sadece talep sahibi veya yetkililer kapatabilir."))
-        await rp(ctx, WN("TALEP KAPATILIYOR", "Transkript hazırlanıyor, bu kanal **10 saniye** içinde silinecek. 🧾"))
-        await ticket_finish(ctx.guild, ctx.channel, t, ctx.author); await asyncio.sleep(10)
+        if not (_ticket_is_admin(ctx.author) or _ticket_can_manage(t, ctx.author) or ctx.author.id == t["user_id"]): return await rp(ctx, ER("YETKİN YOK", "Talebi sadece ticket sahibi, üstlenen yetkili veya Administrator kapatabilir."))
+        await rp(ctx, WN("TALEP KAPATILIYOR", "Transkript hazırlanıyor, bu kanal **10 saniye** içinde silinecek.")); await ticket_finish(ctx.guild, ctx.channel, t, ctx.author); await asyncio.sleep(10)
         try: await ctx.channel.delete(reason="Talep kapatıldı")
         except Exception: pass
     elif i in ("bilgi", "info"):
         if not t: return await rp(ctx, ER("BURASI BİR TİCKET DEĞİL", "Bu kanal bir destek talebi kanalı değil."))
         await rp(ctx, ticket_text(t))
     elif i in ("listele", "list"):
-        if not staff: return await rp(ctx, ER("YETKİN YOK", "Talepleri sadece yetkililer listeleyebilir."))
+        if not (_ticket_is_admin(ctx.author) or _ticket_is_staff(type("X", (), {"user":ctx.author,"guild":ctx.guild})())): return await rp(ctx, ER("YETKİN YOK", "Talepleri sadece ticket yetkilileri listeleyebilir."))
         rs = db.all("SELECT * FROM tickets WHERE guild_id=? AND status='open' ORDER BY number", (ctx.guild.id,))
-        if not rs: return await rp(ctx, OK("AÇIK TALEP YOK", "Şu an açık destek talebi yok, her şey yolunda! ✅"))
-        await rp(ctx, head("ticket", "AÇIK TALEPLER") + "\n\nToplam **" + str(len(rs)) + "** açık talep:\n" + "\n".join(
-            e("arrow") + " <#" + str(r["channel_id"]) + "> ─ " + _tcat(r.get("category"))[0] + " <@" + str(r["user_id"]) + "> ─ " + ("🟡 üstlenildi" if r.get("claimed_by") else "🟢 bekliyor") for r in rs[:20]))
+        if not rs: return await rp(ctx, OK("AÇIK TICKET YOK", "Şu an açık destek talebi yok."))
+        await rp(ctx, head("ticket", "AÇIK TICKETLAR") + "\n\n" + "\n".join(e("arrow") + " <#" + str(r["channel_id"]) + "> ─ " + _tcat(r.get("category"))[0] + " " + _priority_text(r.get("priority")) + " <@" + str(r["user_id"]) + "> ─ " + ("🟡 <@" + str(r["claimed_by"]) + ">" if r.get("claimed_by") else "🟢 bekliyor") for r in rs[:20]))
     elif i in ("ekle", "add", "çıkar", "cikar", "remove"):
         if not t: return await rp(ctx, ER("BURASI BİR TİCKET DEĞİL", "Bu komut sadece destek talebi kanalında çalışır."))
-        if not staff: return await rp(ctx, ER("YETKİN YOK", "Talebe üye ekleyip çıkarmak için yetkili olmalısın."))
+        if not (_ticket_is_admin(ctx.author) or _ticket_can_manage(t, ctx.author)): return await rp(ctx, ER("YETKİN YOK", "`ekle/çıkar` işlemlerini yalnızca ticketı üstlenen yetkili veya Administrator yapabilir."))
         if not u: return await rp(ctx, ER("ÜYE YAZMADIN", "Kullanım: `k!ticket ekle @üye` veya `k!ticket çıkar @üye`"))
         add = i in ("ekle", "add")
-        if not add and u.id == t["user_id"]: return await rp(ctx, WN("TALEP SAHİBİ ÇIKARILAMAZ", "Talebi açan kişiyi kanaldan çıkaramazsın. Talebi kapatabilirsin."))
+        if not add and u.id == t["user_id"]: return await rp(ctx, WN("TALEP SAHİBİ ÇIKARILAMAZ", "Talebi açan kişiyi kanaldan çıkaramazsın."))
         try: await ctx.channel.set_permissions(u, overwrite=discord.PermissionOverwrite(view_channel=True, send_messages=True, attach_files=True, read_message_history=True) if add else None)
         except Exception as ex: return await rp(ctx, ER("İŞLEM BAŞARISIZ", "İzinler değiştirilemedi.\n`" + str(ex)[:120] + "`"))
-        await rp(ctx, OK("ÜYE EKLENDİ" if add else "ÜYE ÇIKARILDI", u.mention + (" artık bu talebi görebilir ve yazabilir. 👥" if add else " bu talebe erişimini kaybetti.")))
+        await rp(ctx, OK("ÜYE EKLENDİ" if add else "ÜYE ÇIKARILDI", u.mention + (" artık bu ticketı görebilir ve yazabilir." if add else " bu ticketa erişimini kaybetti.")))
     else: await rp(ctx, ER("GEÇERSİZ İŞLEM", "Kullanım: `k!ticket kapat` • `bilgi` • `listele` • `ekle @üye` • `çıkar @üye`"))
 @kategori("sys")
 @bot.command(name="başvuru-ayarla", help="<#log> [@rol]")
@@ -2619,47 +2665,11 @@ async def çekilişyenile(ctx, m: int):
     await rp_ch(ctx.channel, head("dice", "YENİDEN ÇEKİLİŞ") + "\n\n" + e("party") + " Yeni kazanan: " + mention + "\nTebrikler! 🎉")
     await rp(ctx, OK("YENİ KAZANAN BELİRLENDİ", mention + " yeni kazanan olarak seçildi."))
 
-@kategori("genel")
-@bot.command(name="resim", aliases=["image", "img"], help="<prompt> — AI ile görsel oluştur")
-@commands.cooldown(1, 8, commands.BucketType.user)
-async def resim(ctx, *, prompt: str):
-    prompt = prompt.strip()
-    if not prompt:
-        return await rp(ctx, ER("PROMPT EKSİK", "Ne oluşturulacağını yazmalısın.\nÖrnek: `k!resim İstanbul'da neon ışıklı cyberpunk kedi`"))
-    if len(prompt) > 4000:
-        return await rp(ctx, ER("PROMPT ÇOK UZUN", "Prompt en fazla **4000 karakter** olabilir."))
-
-    if not HF_TOKEN and not OPENAI_API_KEY:
-        return await rp(ctx, ER("AI AYARLANMADI", "Sunucu yöneticisi `HF_TOKEN` veya `OPENAI_API_KEY` eklemeli."))
-
-    ok, count, pro_user = await ai_image_reserve(ctx.author.id)
-    if not ok:
-        return await rp(ctx, WN("GÜNLÜK AI LİMİTİ DOLDU", "Free üyeler `k!resim` komutunu günde **" + str(AI_FREE_DAILY_LIMIT) + " kez** kullanabilir.\nBugünkü hakkın bitti; Pro üyelerde limit **sınırsızdır**. 💎"))
-
-    status = "Pro • sınırsız" if pro_user else "Free • bugün " + str(count) + "/" + str(AI_FREE_DAILY_LIMIT)
-    await rp(ctx, head("spark", "AI RESİM OLUŞTURULUYOR") + "\n\nPrompt: **" + prompt[:800] + "**\n" + e("dot") + " Plan: **" + status + "**\n\nBiraz bekle, görsel hazırlanıyor... 🎨")
-
-    try:
-        image_bytes, provider_name = await generate_ai_image(prompt, pro_user=pro_user)
-        if not image_bytes:
-            raise RuntimeError("Boş görsel verisi döndü.")
-        file = discord.File(io.BytesIO(image_bytes), filename="katre-ai.png")
-        await ctx.send(content=head("spark", "AI RESİM HAZIR") + "\n\n" + e("dot") + " Prompt: **" + prompt[:800] + "**\n" + e("diamond") + " Plan: **" + status + "**", file=file)
-    except Exception as ex:
-        await ai_image_refund(ctx.author.id)
-        msg = str(ex)
-        if "401" in msg or "Incorrect API key" in msg:
-            msg = "AI API anahtarı geçersiz veya yetkisiz."
-        elif "429" in msg:
-            msg = "AI sağlayıcısı kullanım/rate limit nedeniyle isteği reddetti."
-        elif "403" in msg:
-            msg = "AI sağlayıcısı bu model için erişimi reddetti; token/model ayarlarını kontrol et."
-        await rp(ctx, ER("AI RESİM OLUŞTURULAMADI", msg[:700] + "\n\nKullanım hakkın başarısız üretim nedeniyle geri verildi."))
 @kategori("pro")
 @bot.command(name="pro", help="Durum + ayrıcalıklar")
 async def pro(ctx, u: discord.Member = None):
     u = u or ctx.author; ensure_user(u.id, str(u)); d = db.one("SELECT * FROM users WHERE user_id=?", (u.id,))
-    await rp(ctx, head("pro", "KATRE PRO") + "\n\nDurum: **" + ("PRO ÜYE ✅" if d["pro"] else "Pro değil") + "**\n\n" + e("arrow") + " Özel ses odası\n" + e("arrow") + " Renkli PRO rolü\n" + e("arrow") + " 12 saatte bir **+500 coin**\n" + e("arrow") + " Saatlik şans oyunu ve **2x XP**\n" + e("arrow") + " AI resim: **" + ("Sınırsız" if ai_is_pro(u.id) else "Free " + ai_image_remaining(u.id) + " hak kaldı") + "**\n\nKomutlar: `prooda` `prorol` `probonus` `proşans` `probanner` `prorenk` `protag` `proxp`")
+    await rp(ctx, head("pro", "KATRE PRO") + "\n\nDurum: **" + ("PRO ÜYE ✅" if d["pro"] else "Pro değil") + "**\n\n" + e("arrow") + " Özel ses odası\n" + e("arrow") + " Renkli PRO rolü\n" + e("arrow") + " 12 saatte bir **+500 coin**\n" + e("arrow") + " Saatlik şans oyunu ve **2x XP**\n\nKomutlar: `prooda` `prorol` `probonus` `proşans` `probanner` `prorenk` `protag` `proxp`")
 @kategori("pro")
 @bot.command(name="prooda", help="Özel oda")
 @is_pro()
