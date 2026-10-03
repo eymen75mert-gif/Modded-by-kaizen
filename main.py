@@ -50,7 +50,7 @@ BACKUP_CH = int(os.getenv("BACKUP_CHANNEL_ID", "0"))
 MARKER = "#KATRE_YEDEK"
 DIV = "──────────────────────────────"
 PAGE_SIZE = 15
-BOT_VERSION = "5.9"
+BOT_VERSION = "6.0"
 CHANGELOG = {
     "5.9": [
         "🐛 Ticket panelindeki Components V2 `view parameter must be View not Container` hatası düzeltildi",
@@ -471,7 +471,7 @@ async def guild_log_send(g, t):
             try: await rp_ch(ch, t); return True
             except Exception: pass
     return False
-VERSION_TAGLINE = {"5.8": "Gelişmiş ticket • select panel • öncelik • yetkili kilidi", "5.7": "Free AI API • gelişmiş butonrol sistemi • kalıcı rol panelleri", "5.6": "AI resim • Free 7/gün • Pro sınırsız • gelişmiş çekiliş yönetimi", "5.5": "Yardım menüsü düzeltmesi • avatarlı kartlar • 6 yeni komut", "5.4": "Premium kartlar • V2 ticket • yeni yardım menüsü", "5.3": "Açıklayıcı hatalar • TDK kelime oyunu", "5.2": "Duyuru sistemi • V2 yardım"}
+VERSION_TAGLINE = {"6.0": "Çalışan ticket butonları • ticket'a git • kalıcı select panel • öncelik akışı", "5.8": "Gelişmiş ticket • select panel • öncelik • yetkili kilidi", "5.7": "Free AI API • gelişmiş butonrol sistemi • kalıcı rol panelleri", "5.6": "AI resim • Free 7/gün • Pro sınırsız • gelişmiş çekiliş yönetimi", "5.5": "Yardım menüsü düzeltmesi • avatarlı kartlar • 6 yeni komut", "5.4": "Premium kartlar • V2 ticket • yeni yardım menüsü", "5.3": "Açıklayıcı hatalar • TDK kelime oyunu", "5.2": "Duyuru sistemi • V2 yardım"}
 def update_text(ver, prev=None):
     L = [e("party") + " **KATRE v" + ver + " YAYINDA!**", DIV, e("spark") + " " + VERSION_TAGLINE.get(ver, "Yeni sürüm yayında")]
     ns = CHANGELOG.get(ver, [])
@@ -1042,94 +1042,112 @@ async def ticket_finish(guild, ch, t, closer):
         except Exception: pass
 async def _ticket_apply_permissions(ch, t, guild):
     roles = _ticket_staff_roles(guild)
+    claimed = int(t.get("claimed_by") or 0)
     for r in roles:
-        try: await ch.set_permissions(r, view_channel=True, send_messages=not t.get("claimed_by"), read_message_history=True)
-        except Exception: pass
-    if t.get("claimed_by"):
-        m = guild.get_member(t["claimed_by"])
+        try:
+            await ch.set_permissions(r, view_channel=True, send_messages=(not claimed), attach_files=(not claimed), read_message_history=True)
+        except Exception:
+            pass
+    if claimed:
+        m = guild.get_member(claimed)
         if m:
-            try: await ch.set_permissions(m, view_channel=True, send_messages=True, attach_files=True, read_message_history=True)
-            except Exception: pass
+            try:
+                await ch.set_permissions(m, view_channel=True, send_messages=True, attach_files=True, read_message_history=True)
+            except Exception:
+                pass
+
 async def tk_claim(it):
     t = db.one("SELECT * FROM tickets WHERE channel_id=?", (it.channel.id,))
     if not t: return await sendv_eph(it, ER("TALEP BULUNAMADI", "Bu kanal kayıtlı bir destek talebi değil."))
+    if t["status"] != "open": return await sendv_eph(it, WN("TICKET KAPALI", "Bu ticket artık aktif değil."))
     if not _ticket_is_staff(it): return await sendv_eph(it, ER("YETKİN YOK", "Bu ticketı yalnızca ayarlanmış destek yetkilileri üstlenebilir."))
     if t.get("claimed_by"):
         if t["claimed_by"] == it.user.id: return await sendv_eph(it, WN("ZATEN ÜSTLENDİN", "Bu ticket zaten senin üzerinde."))
-        return await sendv_eph(it, WN("ZATEN ÜSTLENİLMİŞ", "Bu talebi <@" + str(t["claimed_by"]) + "> üstlenmiş."))
-    db.q("UPDATE tickets SET claimed_by=? WHERE channel_id=?", (it.user.id, it.channel.id)); t["claimed_by"] = it.user.id
+        return await sendv_eph(it, WN("ZATEN ÜSTLENİLMİŞ", "Bu ticketı <@" + str(t["claimed_by"]) + "> üstlenmiş."))
+    db.q("UPDATE tickets SET claimed_by=? WHERE channel_id=?", (it.user.id, it.channel.id))
+    t = db.one("SELECT * FROM tickets WHERE channel_id=?", (it.channel.id,))
     await _ticket_apply_permissions(it.channel, t, it.guild)
-    try: await it.response.edit_message(view=ticket_view_v2(t))
-    except Exception: pass
-    await rp_ch(it.channel, OK("🎫 TICKET ÜSTLENİLDİ", it.user.mention + " bu ticketı **üstlendi**.\n🔒 Administrator olmayan diğer yetkililer artık bu kanala mesaj yazamaz.\n🛠️ Ticket işlemleri için `k!ticket bilgi`, `k!ticket ekle @üye`, `k!ticket çıkar @üye` ve `k!ticket kapat` komutlarını kullanabilirsin."))
+    try: await it.response.edit_message(content=ticket_text(t), view=TicketActionView())
+    except Exception:
+        try: await it.response.defer()
+        except Exception: pass
+    await rp_ch(it.channel, OK("🎫 TICKET ÜSTLENİLDİ", it.user.mention + " bu ticketı **üstlendi**.\n🔒 Administrator olmayan diğer yetkililer artık mesaj gönderemez.\n👮 Üstlenen yetkili ve Administrator müdahale edebilir."))
+
 async def tk_trans(it):
     t = db.one("SELECT * FROM tickets WHERE channel_id=?", (it.channel.id,))
     if not t: return await sendv_eph(it, ER("TALEP BULUNAMADI", "Bu kanal kayıtlı bir destek talebi değil."))
-    if not (_ticket_is_admin(it.user) or _ticket_can_manage(t, it.user) or it.user.id == t["user_id"]): return await sendv_eph(it, ER("YETKİN YOK", "Transkripti ticket sahibi, ticketı üstlenen yetkili veya Administrator alabilir."))
-    await it.response.defer(ephemeral=True); data = await ticket_transcript(it.channel, t)
+    if not (_ticket_is_admin(it.user) or _ticket_can_manage(t, it.user) or it.user.id == t["user_id"]): return await sendv_eph(it, ER("YETKİN YOK", "Transkripti ticket sahibi, üstlenen yetkili veya Administrator alabilir."))
+    await it.response.defer(ephemeral=True)
+    data = await ticket_transcript(it.channel, t)
     try: await it.followup.send("🧾 **Transkript hazır**", file=discord.File(io.BytesIO(data), filename="talep-" + str(t.get("number") or it.channel.id) + ".txt"), ephemeral=True)
     except Exception as ex: await sendf_eph(it, ER("TRANSKRİPT HATASI", str(ex)[:150]))
+
 async def tk_close(it):
     t = db.one("SELECT * FROM tickets WHERE channel_id=?", (it.channel.id,))
     if not t: return await sendv_eph(it, ER("TALEP BULUNAMADI", "Bu kanal kayıtlı bir destek talebi değil."))
     if not (_ticket_is_admin(it.user) or _ticket_can_manage(t, it.user) or it.user.id == t["user_id"]): return await sendv_eph(it, ER("YETKİN YOK", "Talebi sadece ticket sahibi, üstlenen yetkili veya Administrator kapatabilir."))
     await sendv_eph(it, WN("TALEP KAPATILIYOR", "Transkript hazırlanıyor, kanal **10 saniye** içinde silinecek."))
-    try: await it.message.edit(view=ticket_view_v2(dict(t, status="closed"), closed=True))
+    try: await it.message.edit(content=ticket_text(dict(t, status="closed")), view=None)
     except Exception: pass
-    await ticket_finish(it.guild, it.channel, t, it.user); await asyncio.sleep(10)
+    await ticket_finish(it.guild, it.channel, t, it.user)
+    await asyncio.sleep(10)
     try: await it.channel.delete(reason="Talep kapatıldı")
     except Exception: pass
+
 async def tk_mine(it):
     t = db.one("SELECT * FROM tickets WHERE guild_id=? AND user_id=? AND status='open'", (it.guild.id, it.user.id,))
-    if t: await sendv_eph(it, OK("AÇIK TALEBİN VAR", "Talep kanalın: <#" + str(t["channel_id"]) + ">\nDurum: " + ("🟡 Üstlenildi" if t.get("claimed_by") else "🟢 Yetkili bekleniyor")))
-    else: await sendv_eph(it, WN("AÇIK TALEBİN YOK", "Şu an açık bir destek talebin bulunmuyor."))
-def _tcat_cb(key):
-    async def cb(it): await it.response.send_modal(TicketModal(key))
-    return cb
+    if t: await sendv_eph(it, OK("AÇIK TİCKETIN VAR", "Ticket kanalın: <#" + str(t["channel_id"]) + ">\nDurum: " + ("🟡 Üstlenildi" if t.get("claimed_by") else "🟢 Yetkili bekleniyor")))
+    else: await sendv_eph(it, WN("AÇIK TİCKETIN YOK", "Şu an açık destek ticketın bulunmuyor."))
+
+class TicketCategorySelect(Select):
+    def __init__(self):
+        super().__init__(placeholder="🎫 Ticket türünü seç...", min_values=1, max_values=1, custom_id="katre_ticket_category_v6", options=[discord.SelectOption(label=nm, value=k, emoji=em, description="Yeni " + nm.lower() + " talebi oluştur") for k,(em,nm,_) in TICKET_CATS.items()])
+    async def callback(self, it):
+        await it.response.send_message("⚡ **Ticket önceliğini seç:**", view=TicketPriorityView(self.values[0]), ephemeral=True)
+
+class TicketOpenView(View):
+    def __init__(self):
+        super().__init__(timeout=None)
+        self.add_item(TicketCategorySelect())
+
 class TicketPriorityView(View):
     def __init__(self, cat):
-        super().__init__(timeout=120)
-        self.cat = cat
+        super().__init__(timeout=180)
         self.add_item(TicketPrioritySelect(cat))
+
 class TicketPrioritySelect(Select):
     def __init__(self, cat):
         self.cat = cat
-        super().__init__(placeholder="⚡ Öncelik seç...", min_values=1, max_values=1, options=[discord.SelectOption(label=nm, value=k, emoji=em) for k,(em,nm) in TICKET_PRIORITIES.items()])
+        super().__init__(placeholder="⚡ Öncelik seç...", min_values=1, max_values=1, custom_id="katre_ticket_priority_" + cat, options=[discord.SelectOption(label=nm, value=k, emoji=em) for k,(em,nm) in TICKET_PRIORITIES.items()])
     async def callback(self, it):
         await it.response.send_modal(TicketModal(self.cat, self.values[0]))
-class TicketCategorySelect(Select):
+
+class TicketActionView(View):
     def __init__(self):
-        super().__init__(placeholder="🎫 Ticket türünü seç...", min_values=1, max_values=1, custom_id="ticket_category_select", options=[discord.SelectOption(label=nm, value=k, emoji=em, description=("Yeni " + nm.lower() + " talebi oluştur")) for k,(em,nm,_) in TICKET_CATS.items()])
-    async def callback(self, it):
-        await it.response.send_message("⚡ **Ticket önceliğini seç:**", view=TicketPriorityView(self.values[0]), ephemeral=True)
+        super().__init__(timeout=None)
+
+    @discord.ui.button(label="Üstlen", style=discord.ButtonStyle.success, emoji="👮", custom_id="katre_ticket_claim_v6")
+    async def claim(self, it, button): await tk_claim(it)
+
+    @discord.ui.button(label="Transkript", style=discord.ButtonStyle.secondary, emoji="🧾", custom_id="katre_ticket_transcript_v6")
+    async def transcript(self, it, button): await tk_trans(it)
+
+    @discord.ui.button(label="Kapat", style=discord.ButtonStyle.danger, emoji="🔒", custom_id="katre_ticket_close_v6")
+    async def close(self, it, button): await tk_close(it)
+
 def ticket_view_v2(t=None, closed=False):
-    if t: col = _tcat(t.get("category"))[2]; text = ticket_text(t)
-    else: col = 0x1ABC9C; text = head("ticket", "TALEP")
-    rows = []
-    if not closed:
-        rows.append(_row(mkbtn("Üstlen", tk_claim, discord.ButtonStyle.success, "👮", "kt2_claim"), mkbtn("Transkript", tk_trans, discord.ButtonStyle.secondary, e("log"), "kt2_trans"), mkbtn("Kapat", tk_close, discord.ButtonStyle.danger, e("lock"), "kt2_close")))
-    return card_view(text, rows, accent=col)
-def ticket_open_v2(guild=None):
-    text = (head("ticket", "DESTEK MERKEZİ") + "\n\nAşağıdaki menüden destek türünü seç. Form açılacak; konu, açıklama ve **öncelik** bilgilerini doldurduğunda sana özel ticket açılacak.\n\n" + e("info") + " Aynı anda yalnızca **1 açık** ticket açabilirsin.")
-    if V2_OK and Container and LayoutView:
-        # Components V2'de Container doğrudan `view=` parametresine verilemez.
-        # Container bir LayoutView içine eklenmelidir.
-        try:
-            lv = LayoutView(timeout=None)
-        except TypeError:
-            lv = LayoutView()
-            con = Container()
-            con.add_item(TextDisplay(text))
-            _sep(con, False); con.add_item(_row(TicketCategorySelect()))
-            lv.add_item(con)
-            return lv
-        con = Container()
-        con.add_item(TextDisplay(text))
-        _sep(con, False)
-        con.add_item(_row(TicketCategorySelect()))
-        lv.add_item(con)
-        return lv
-    return TicketOpenPanel(text)
+    return None if closed else TicketActionView()
+
+def ticket_open_v2(guild=None): return TicketOpenView()
+
+def ticket_open_v2_text():
+    return head("ticket", "DESTEK MERKEZİ") + "\n\nAşağıdaki menüden ticket türünü seç. Ardından **öncelik** seçip formu doldur. Form tamamlanınca sana özel ticket kanalı açılır.\n\n" + e("info") + " Aynı anda yalnızca **1 açık** ticket açabilirsin."
+
+class TicketGoView(View):
+    def __init__(self, url):
+        super().__init__(timeout=300)
+        self.add_item(Button(label="🎫 Tickete Git", style=discord.ButtonStyle.link, url=url))
+
 class TicketModal(Modal, title="Destek Talebi"):
     konu = TextInput(label="Konu", max_length=100, placeholder="Sorununu kısaca yaz")
     acik = TextInput(label="Açıklama", style=discord.TextStyle.paragraph, max_length=900, placeholder="Detayları ve ne beklediğini anlat...")
@@ -1140,9 +1158,11 @@ class TicketModal(Modal, title="Destek Talebi"):
         if not g: return
         await it.response.defer(ephemeral=True)
         ex = db.one("SELECT channel_id FROM tickets WHERE guild_id=? AND user_id=? AND status='open'", (g.id, it.user.id))
-        if ex: return await sendf_eph(it, ER("AÇIK TİCKETIN VAR", "Zaten açık ticketın var: <#" + str(ex["channel_id"]) + ">"))
+        if ex:
+            ch0 = g.get_channel(ex["channel_id"])
+            return await sendf_eph(it, ER("AÇIK TİCKETIN VAR", "Zaten açık ticketın var: " + (ch0.mention if ch0 else "#" + str(ex["channel_id"]))))
         em, nm, _ = _tcat(self.cat); priority = self.priority
-        num = db.one("SELECT COALESCE(MAX(number),0) c FROM tickets WHERE guild_id=?", (g.id,))["c"] + 1
+        num = int(db.one("SELECT COALESCE(MAX(number),0) c FROM tickets WHERE guild_id=?", (g.id,))["c"] or 0) + 1
         cat = discord.utils.get(g.categories, name="DESTEK")
         if not cat:
             try: cat = await g.create_category("DESTEK")
@@ -1155,22 +1175,13 @@ class TicketModal(Modal, title="Destek Talebi"):
         except Exception as e2: return await sendf_eph(it, ER("KANAL AÇILAMADI", "Talep kanalı oluşturulamadı.\n`" + str(e2)[:150] + "`"))
         db.q("INSERT INTO tickets(channel_id,guild_id,user_id,subject,category,created_at,number,description,priority) VALUES(?,?,?,?,?,?,?,?,?)", (ch.id, g.id, it.user.id, self.konu.value[:100], self.cat, datetime.datetime.now().isoformat(), num, self.acik.value[:900], priority))
         t = db.one("SELECT * FROM tickets WHERE channel_id=?", (ch.id,))
-        mentions = it.user.mention + " " + " ".join(r.mention for r in roles)
-        await ch.send(mentions, allowed_mentions=discord.AllowedMentions(users=True, roles=True))
+        await ch.send(it.user.mention + " " + " ".join(r.mention for r in roles), allowed_mentions=discord.AllowedMentions(users=True, roles=True))
         await ch.send(OK("🎫 YENİ TICKET", it.user.mention + " tarafından yeni bir **" + nm + "** ticket açıldı.\n" + _priority_text(priority) + " **Öncelik**\n\nYetkili ekipten bir kişi **Üstlen** butonuna basmalıdır.\nÜstlenildikten sonra Administrator olmayan diğer yetkililer yazamaz."), allowed_mentions=discord.AllowedMentions(users=True, roles=True))
-        await ch.send(ticket_text(t), view=ticket_view_v2(t))
+        await ch.send(ticket_text(t), view=TicketActionView())
         await ch.send("-# `k!ticket bilgi` • `k!ticket ekle @üye` • `k!ticket çıkar @üye` • `k!ticket kapat`")
-        await sendf_eph(it, OK("TİCKET OLUŞTURULDU", "Özel ticket kanalın hazır: " + ch.mention + "\nÖncelik: **" + TICKET_PRIORITIES[priority][1] + "**"))
-class TicketOpenPanel(Panel):
-    def __init__(self, text):
-        super().__init__(text, timeout=None)
-        self.add_item(TicketCategorySelect())
-class TicketPanel(Panel):
-    def __init__(self, text):
-        super().__init__(text, timeout=None)
-        self.btn("Üstlen", tk_claim, emoji="👮", cid="kt_claim")
-        self.btn("Transkript", tk_trans, style=discord.ButtonStyle.secondary, emoji=e("log"), cid="kt_trans")
-        self.btn("Kapat", tk_close, style=discord.ButtonStyle.danger, emoji=e("lock"), cid="kt_close")
+        await it.followup.send(OK("TİCKET OLUŞTURULDU", "Özel ticket kanalın hazır: " + ch.mention + "\nÖncelik: **" + TICKET_PRIORITIES[priority][1] + "**"), view=TicketGoView(ch.jump_url), ephemeral=True)
+
+class TicketPanel(TicketOpenView): pass
 
 class AppOpenPanel(Panel):
     def __init__(self, text):
@@ -1325,9 +1336,9 @@ class KatreBot(commands.Bot):
         return list(b)
     async def setup_hook(self):
         self.gwv = GiveawayPanel(self, " ")
-        for v in (self.gwv, TicketOpenPanel(" "), TicketPanel(" "), AppOpenPanel(" "), HelpPanel(self, " "), OwnerPanel(self, " ")): self.add_view(v)
+        for v in (self.gwv, TicketOpenView(), TicketActionView(), AppOpenPanel(" "), HelpPanel(self, " "), OwnerPanel(self, " ")): self.add_view(v)
         if V2_OK:
-            for mk in (lambda: help_v2(self, " "), lambda: ticket_open_v2(None), lambda: ticket_view_v2(None)):
+            for mk in (lambda: help_v2(self, " "),):
                 try: self.add_view(mk())
                 except Exception: traceback.print_exc()
         self.status_loop.start(); self.gw_checker.start(); self.pro_checker.start(); self.backup_loop.start(); self.stats_loop.start()
@@ -1854,7 +1865,7 @@ async def rep(ctx, u: discord.Member):
 @bot.command(name="destek", aliases=["ticketpanel"], help="Select menülü ticket paneli")
 @commands.has_permissions(administrator=True)
 async def destek(ctx):
-    await ctx.send(view=ticket_open_v2(ctx.guild))
+    await ctx.send(ticket_open_v2_text(), view=ticket_open_v2(ctx.guild))
     try: await ctx.message.delete()
     except Exception: pass
 @kategori("sys")
