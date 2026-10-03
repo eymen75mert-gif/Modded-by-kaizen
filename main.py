@@ -1713,7 +1713,9 @@ async def market(ctx):
 async def eightball(ctx, *, s): await rp(ctx, head("search", "8BALL") + "\n\n**Soru:** " + s[:80] + "\n**Cevap:** " + random.choice(["Evet!", "Büyük ihtimalle", "Belki", "Hayır", "Asla!", "Kesinlikle"]))
 @kategori("fun")
 @bot.command(name="yazıtura", help="At")
-async def yazıtura(ctx): await rp(ctx, head("dice", "YAZI TURA") + "\n\nPara havaya atıldı… Sonuç: **" + random.choice(["YAZI", "TURA"]) + "**")) if False else await rp(ctx, head("dice", "YAZI TURA") + "\n\nPara havaya atıldı… Sonuç: **" + random.choice(["YAZI", "TURA"]) + "**")
+async def yazıtura(ctx):
+    await rp(ctx, head("dice", "YAZI TURA") + "\n\nPara havaya atıldı… Sonuç: **" + random.choice(["YAZI", "TURA"]) + "**")
+
 @kategori("fun")
 @bot.command(name="zar", help="1-6")
 async def zar(ctx):
