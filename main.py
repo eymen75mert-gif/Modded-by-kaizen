@@ -1,12 +1,12 @@
 # ═══════════════════════════════════════════════════════════════════
-#  💧 KATRE BOT v5.5 — BÖLÜM 1/2 • PREMİUM KART • V2 TİCKET • V2 YARDIM • YENİ KOMUTLAR
-#  ENV: BOT_TOKEN, OWNER_ID, SUPPORT_URL, BACKUP_CHANNEL_ID
+#  💧 KATRE BOT v5.6 — BÖLÜM 1/2 • AI RESİM • ÇEKİLİŞ YÖNETİMİ • PREMIUM KART • V2 TİCKET • V2 YARDIM
+#  ENV: BOT_TOKEN, OWNER_ID, SUPPORT_URL, BACKUP_CHANNEL_ID, OPENAI_API_KEY, OPENAI_IMAGE_MODEL
 #  requirements.txt: discord.py>=2.6.0
 # ═══════════════════════════════════════════════════════════════════
 import discord
 from discord.ext import commands, tasks
 from discord.ui import View, Button, Select, Modal, TextInput
-import time, sqlite3, os, sys, json, random, asyncio, datetime, traceback, textwrap, io, re, inspect, urllib.parse
+import time, sqlite3, os, sys, json, random, asyncio, datetime, traceback, textwrap, io, re, inspect, urllib.parse, base64
 import aiohttp
 from collections import deque
 from contextlib import redirect_stdout
@@ -36,12 +36,25 @@ BOT_TOKEN = os.getenv("BOT_TOKEN", "BURAYA_TOKEN")
 OWNER_ID = int(os.getenv("OWNER_ID", "0"))
 SUPPORT_URL = os.getenv("SUPPORT_URL", "https://discord.gg/katre")
 DB_PATH = os.getenv("DB_PATH", "katre.db")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
+OPENAI_IMAGE_MODEL = os.getenv("OPENAI_IMAGE_MODEL", "gpt-image-2").strip() or "gpt-image-2"
+AI_FREE_DAILY_LIMIT = 7
 BACKUP_CH = int(os.getenv("BACKUP_CHANNEL_ID", "0"))
 MARKER = "#KATRE_YEDEK"
 DIV = "──────────────────────────────"
 PAGE_SIZE = 15
-BOT_VERSION = "5.5"
+BOT_VERSION = "5.6"
 CHANGELOG = {
+    "5.6": [
+        "🤖 `k!resim <prompt>` eklendi: OpenAI görsel üretimi ile AI resim oluşturur",
+        "📊 AI resim kullanım limiti eklendi: Free günlük **7**, Pro **sınırsız**",
+        "🛡️ Limit sistemi başarısız üretimlerde hakkı geri verir ve gün bazlı sıfırlanır",
+        "🎁 Çekiliş panelindeki yönetim butonları kaldırıldı; panel yalnızca katılım için kullanılıyor",
+        "📝 Çekilişler oluşturan kişi veya sunucu yöneticileri tarafından `k!çekilişdüzenle` ile düzenlenebiliyor",
+        "🔧 `k!çekilişbitir`, `k!çekilişiptal` ve `k!çekilişyenile` artık çekiliş sahibi veya yöneticiler tarafından kullanılabiliyor",
+        "🐛 Çekiliş yeniden çekiliş etkileşimindeki çift-response hatası giderildi",
+        "💎 `k!pro` panelinde AI resim Free/Pro limitleri açıkça gösteriliyor",
+    ],
     "5.5": [
         "🛠️ Yardım menüsünde kategori seçimi düzeltildi: menüden seçince kategori artık açılıyor",
         "📌 Yardım menüsünde seçili kategori işaretleniyor, ana menüde rastgele ipucu gösteriliyor",
@@ -80,7 +93,7 @@ class DB:
         CREATE TABLE IF NOT EXISTS owner_settings(id INTEGER PRIMARY KEY DEFAULT 1, maintenance INTEGER DEFAULT 0);
         CREATE TABLE IF NOT EXISTS bot_meta(key TEXT PRIMARY KEY, value TEXT);
         CREATE TABLE IF NOT EXISTS half_owners(user_id INTEGER PRIMARY KEY, since TEXT, added_by INTEGER);
-        CREATE TABLE IF NOT EXISTS giveaways(message_id INTEGER PRIMARY KEY, guild_id INTEGER, channel_id INTEGER, prize TEXT, winners INTEGER, end_time REAL, participants TEXT DEFAULT '[]', status TEXT DEFAULT 'active', host INTEGER);
+        CREATE TABLE IF NOT EXISTS giveaways(message_id INTEGER PRIMARY KEY, guild_id INTEGER, channel_id INTEGER, prize TEXT, winners INTEGER, end_time REAL, participants TEXT DEFAULT '[]', status TEXT DEFAULT 'active', host INTEGER);\n        CREATE TABLE IF NOT EXISTS ai_usage(user_id INTEGER NOT NULL, usage_day TEXT NOT NULL, uses INTEGER DEFAULT 0, PRIMARY KEY(user_id, usage_day));
         CREATE TABLE IF NOT EXISTS tickets(channel_id INTEGER PRIMARY KEY, guild_id INTEGER, user_id INTEGER, claimed_by INTEGER, status TEXT DEFAULT 'open');
         CREATE TABLE IF NOT EXISTS role_menus(menu_id TEXT PRIMARY KEY, guild_id INTEGER, role_ids TEXT);
         CREATE TABLE IF NOT EXISTS blacklist(user_id INTEGER PRIMARY KEY, reason TEXT);
@@ -240,7 +253,7 @@ def sn_txt(sn):
 
 # ─────────────── Açıklayıcı hata yardımcıları ───────────────
 ARG_TR = {"u":"üye","s":"sebep","m":"metin","i":"işlem","ch":"kanal","a":"değer","b":"değer","g":"gün","dk":"dakika","k":"değer","h":"hedef","t2":"sayı","md":"modül","d":"aç/kapat","uid":"kullanıcı-id","role":"rol","ms":"üyeler","rs":"roller","cat":"kategori","süre":"süre","ö":"ödül","arg":"değer","y":"yeni-önek","name":"komut","t":"metin","hedef":"hedef","mod":"aç/kapat","code":"kod","slot":"slot","val":"değer"}
-ARG_OVR = {("çekiliş","s"):"süre",("çekiliş","k"):"kazanan-sayısı",("oylama","s"):"soru | seçenek1 | seçenek2",("8ball","s"):"soru",("seç","s"):"seçenekler",("tahmin","s"):"sayı(1-10)",("yavaşmod","s"):"saniye",("seviyerol","s"):"seviye",("transfer","m"):"miktar",("bahis","m"):"miktar",("çekilişbitir","m"):"mesaj-id",("raidmodu","m"):"aç/kapat",("temizle","a"):"adet",("ceza-sistemi","a"):"mute-uyarı-sayısı",("ceza-sistemi","b"):"ban-uyarı-sayısı",("proembed","a"):"başlık | mesaj | renk",("otocevap","a"):"tetik | cevap",("doğumgünü","a"):"ay",("sayaç","h"):"hedef-üye",("prorenk","h"):"hex-renk",("badword","k"):"kelime",("şanslı","t2"):"sayı(1-100)",("koruma","d"):"aç/kapat",("ticket","i"):"kapat/bilgi/listele",("hatırlat","m"):"mesaj"}
+ARG_OVR = {("çekiliş","s"):"süre",("çekiliş","k"):"kazanan-sayısı",("oylama","s"):"soru | seçenek1 | seçenek2",("8ball","s"):"soru",("seç","s"):"seçenekler",("tahmin","s"):"sayı(1-10)",("yavaşmod","s"):"saniye",("seviyerol","s"):"seviye",("transfer","m"):"miktar",("bahis","m"):"miktar",("çekilişbitir","m"):"mesaj-id",("raidmodu","m"):"aç/kapat",("temizle","a"):"adet",("ceza-sistemi","a"):"mute-uyarı-sayısı",("ceza-sistemi","b"):"ban-uyarı-sayısı",("proembed","a"):"başlık | mesaj | renk",("otocevap","a"):"tetik | cevap",("doğumgünü","a"):"ay",("sayaç","h"):"hedef-üye",("prorenk","h"):"hex-renk",("badword","k"):"kelime",("şanslı","t2"):"sayı(1-100)",("koruma","d"):"aç/kapat",("ticket","i"):"kapat/bilgi/listele",("hatırlat","m"):"mesaj",("resim","prompt"):"prompt",("çekilişdüzenle","s"):"süre",("çekilişdüzenle","k"):"kazanan-sayısı",("çekilişdüzenle","ö"):"ödül",("çekilişbitir","m"):"mesaj-id",("çekilişiptal","m"):"mesaj-id",("çekilişyenile","m"):"mesaj-id"}
 def pf(ctx):
     try: return ctx.clean_prefix or "k!"
     except Exception: return "k!"
@@ -426,7 +439,7 @@ async def guild_log_send(g, t):
             try: await rp_ch(ch, t); return True
             except Exception: pass
     return False
-VERSION_TAGLINE = {"5.5": "Yardım menüsü düzeltmesi • avatarlı kartlar • 6 yeni komut", "5.4": "Premium kartlar • V2 ticket • yeni yardım menüsü", "5.3": "Açıklayıcı hatalar • TDK kelime oyunu", "5.2": "Duyuru sistemi • V2 yardım"}
+VERSION_TAGLINE = {"5.6": "AI resim • Free 7/gün • Pro sınırsız • gelişmiş çekiliş yönetimi", "5.5": "Yardım menüsü düzeltmesi • avatarlı kartlar • 6 yeni komut", "5.4": "Premium kartlar • V2 ticket • yeni yardım menüsü", "5.3": "Açıklayıcı hatalar • TDK kelime oyunu", "5.2": "Duyuru sistemi • V2 yardım"}
 def update_text(ver, prev=None):
     L = [e("party") + " **KATRE v" + ver + " YAYINDA!**", DIV, e("spark") + " " + VERSION_TAGLINE.get(ver, "Yeni sürüm yayında")]
     ns = CHANGELOG.get(ver, [])
@@ -470,6 +483,105 @@ async def check_update(bot):
 
 class OwnerOnly(commands.CheckFailure): pass
 class ProOnly(commands.CheckFailure): pass
+
+AI_IMAGE_LOCK = asyncio.Lock()
+
+def ai_is_pro(user_id):
+    u = db.one("SELECT pro,pro_expiry FROM users WHERE user_id=?", (user_id,))
+    if not u or not u["pro"]:
+        return False
+    if u["pro_expiry"]:
+        try:
+            if datetime.datetime.now() >= datetime.datetime.fromisoformat(u["pro_expiry"]):
+                db.q("UPDATE users SET pro=0, pro_expiry=NULL WHERE user_id=?", (user_id,))
+                pro_log(user_id, "SÜRESİ DOLDU")
+                return False
+        except Exception:
+            db.q("UPDATE users SET pro=0, pro_expiry=NULL WHERE user_id=?", (user_id,))
+            return False
+    return True
+
+async def ai_image_reserve(user_id):
+    """Başarılı üretim sonrası geri alınabilmesi için hakkı üretimden önce rezerve eder."""
+    if ai_is_pro(user_id):
+        return True, None, True
+    day = datetime.datetime.now().date().isoformat()
+    async with AI_IMAGE_LOCK:
+        row = db.one("SELECT uses FROM ai_usage WHERE user_id=? AND usage_day=?", (user_id, day))
+        used = int(row["uses"]) if row else 0
+        if used >= AI_FREE_DAILY_LIMIT:
+            return False, used, False
+        if row:
+            db.q("UPDATE ai_usage SET uses=uses+1 WHERE user_id=? AND usage_day=?", (user_id, day))
+        else:
+            db.q("INSERT INTO ai_usage(user_id,usage_day,uses) VALUES(?,?,1)", (user_id, day))
+        return True, used + 1, False
+
+async def ai_image_refund(user_id):
+    if ai_is_pro(user_id):
+        return
+    day = datetime.datetime.now().date().isoformat()
+    async with AI_IMAGE_LOCK:
+        row = db.one("SELECT uses FROM ai_usage WHERE user_id=? AND usage_day=?", (user_id, day))
+        if not row:
+            return
+        new_uses = max(0, int(row["uses"]) - 1)
+        if new_uses:
+            db.q("UPDATE ai_usage SET uses=? WHERE user_id=? AND usage_day=?", (new_uses, user_id, day))
+        else:
+            db.q("DELETE FROM ai_usage WHERE user_id=? AND usage_day=?", (user_id, day))
+
+def ai_image_remaining(user_id):
+    if ai_is_pro(user_id):
+        return "Sınırsız"
+    day = datetime.datetime.now().date().isoformat()
+    row = db.one("SELECT uses FROM ai_usage WHERE user_id=? AND usage_day=?", (user_id, day))
+    used = int(row["uses"]) if row else 0
+    return str(max(0, AI_FREE_DAILY_LIMIT - used))
+
+async def openai_generate_image(prompt):
+    if not OPENAI_API_KEY:
+        raise RuntimeError("OPENAI_API_KEY ayarlanmamış.")
+    payload = {
+        "model": OPENAI_IMAGE_MODEL,
+        "prompt": prompt[:4000],
+        "size": "1024x1024",
+        "n": 1,
+    }
+    headers = {
+        "Authorization": "Bearer " + OPENAI_API_KEY,
+        "Content-Type": "application/json",
+    }
+    timeout = aiohttp.ClientTimeout(total=180)
+    async with aiohttp.ClientSession(timeout=timeout) as ses:
+        async with ses.post("https://api.openai.com/v1/images/generations", json=payload, headers=headers) as r:
+            raw = await r.text()
+            if r.status >= 400:
+                try:
+                    err = json.loads(raw)
+                    msg = err.get("error", {}).get("message") or raw
+                except Exception:
+                    msg = raw
+                raise RuntimeError("OpenAI API " + str(r.status) + ": " + str(msg)[:500])
+            data = json.loads(raw)
+    items = data.get("data") or []
+    if not items:
+        raise RuntimeError("OpenAI görsel yanıtı boş döndü.")
+    item = items[0]
+    if item.get("b64_json"):
+        try:
+            return base64.b64decode(item["b64_json"])
+        except Exception as ex:
+            raise RuntimeError("Görsel verisi çözülemedi: " + str(ex))
+    url = item.get("url")
+    if url:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=120)) as ses:
+            async with ses.get(url) as r:
+                if r.status != 200:
+                    raise RuntimeError("Üretilen görsel indirilemedi (HTTP " + str(r.status) + ").")
+                return await r.read()
+    raise RuntimeError("OpenAI yanıtında b64_json veya url bulunamadı.")
+
 def is_owner():
     async def p(ctx):
         if ctx.author.id != OWNER_ID: raise OwnerOnly()
@@ -494,13 +606,13 @@ def kategori(a):
     return d
 
 CATS = {"genel":("genel","Genel & Sistem"),"mod":("mod","Moderasyon & Koruma"),"sys":("sys","Başvuru & Otomasyon"),"eco":("eco","Ekonomi"),"fun":("fun","Eğlence"),"give":("give","Çekiliş"),"pro":("pro","Pro"),"owner":("owner","Owner")}
-CAT_DESC = {"genel":"Rank, profil, avatar, snipe, AFK, oda","mod":"Ban, kick, unban, mute, uyarı, oto-ceza, koruma","sys":"Başvuru, ticket, temp voice, kelime oyunu, log","eco":"Coin, günlük, çalışma, balık, maden, market","fun":"Quiz, slot, aşk, anket ve oyunlar","give":"Butonlu çekiliş, reroll, sonuç paneli","pro":"Pro oda, rol, bonus, banner, şans","owner":"Owner + Half Owner paneli, duyuru"}
+CAT_DESC = {"genel":"Rank, profil, avatar, snipe, AFK, oda, AI resim","mod":"Ban, kick, unban, mute, uyarı, oto-ceza, koruma","sys":"Başvuru, ticket, temp voice, kelime oyunu, log","eco":"Coin, günlük, çalışma, balık, maden, market","fun":"Quiz, slot, aşk, anket ve oyunlar","give":"Butonlu çekiliş, reroll, sonuç paneli","pro":"Pro oda, rol, bonus, banner, şans","owner":"Owner + Half Owner paneli, duyuru"}
 def cat_count(b, k): return len([c for c in b.commands if getattr(c, "kategori", None) == k])
 HELP_COLORS = {"genel":0x5865F2,"mod":0xE67E22,"sys":0x1ABC9C,"eco":0xF1C40F,"fun":0x9B59B6,"give":0xEB459E,"pro":0x00D9FF,"owner":0xFEE75C}
 HELP_TIPS = ["`k!günlük` ile her gün ücretsiz coin topla.", "`k!rank` ile seviyeni ve sıralamanı gör.", "`k!destek` paneliyle sunucunda ticket sistemi kurabilirsin.",
     "`k!afk <sebep>` yazınca seni etiketleyenlere sebebi gösteririm.", "`k!oylama soru | seçenek1 | seçenek2` ile hızlı anket aç.", "`k!hesapla 12*(3+4)` ile hızlı hesap yap.",
     "`k!komutbilgi <komut>` ile bir komutun kullanımını öğren.", "`k!çekiliş` ile butonlu çekiliş başlatabilirsin.", "`k!kullanıcıbilgi @üye` ile üye hakkında detaylı bilgi al.",
-    "`k!sarıl @üye` ile birine sıcak bir sarılma gönder."]
+    "`k!sarıl @üye` ile birine sıcak bir sarılma gönder.", "`k!resim <prompt>` ile AI görsel oluştur. Free günlük 7, Pro sınırsız."]
 def help_content(bot):
     L = ["## " + e("logo") + " " + bot.user.name.upper() + " • YARDIM MERKEZİ", DIV,
          "Selam! Ben **" + bot.user.name + "** " + e("spark") + " — moderasyon, ekonomi, eğlence, ticket ve çok daha fazlası tek botta.", "",
@@ -682,60 +794,52 @@ def gw_start(gw):
 def gw_end(gw, men, parts):
     return ("## " + e("star") + " " + gw["prize"] + "\n" + DIV + "\n**ÇEKİLİŞ BİTTİ**\n\n" + KV([(e("star")+"Kazanan", men), (e("dot")+"Katılım", str(len(parts)) + " kişi"), (e("dot")+"Düzenleyen", "<@" + str(gw["host"]) + ">"), (e("alarm")+"Bitti", "<t:" + str(int(datetime.datetime.now().timestamp())) + ":F>")]) + "\n\n" + e("party") + " Kazananlar duyuruda.")
 class GiveawayPanel(Panel):
+    """Kalıcı çekiliş katılım paneli.
+
+    Yönetim işlemleri artık butonlarla yapılmaz; çekiliş sahibi veya yöneticiler
+    komutlarla düzenleme/bitirme/iptal/yeniden çekme işlemlerini yapar.
+    """
     def __init__(self, bot, text):
         super().__init__(text, timeout=None); self.bot = bot
+
         async def join(it):
             gw = db.one("SELECT * FROM giveaways WHERE message_id=?", (it.message.id,))
-            if not gw or gw["status"] != "active": return await sendv_eph(it, ER("ÇEKİLİŞ AKTİF DEĞİL", "Bu çekiliş sona ermiş veya iptal edilmiş."))
+            if not gw or gw["status"] != "active":
+                return await sendv_eph(it, ER("ÇEKİLİŞ AKTİF DEĞİL", "Bu çekiliş sona ermiş veya iptal edilmiş."))
             p = json.loads(gw["participants"])
-            if str(it.user.id) in p: return await sendv_eph(it, WN("ZATEN KATILDIN", "Bu çekilişe zaten katılmışsın, tekrar katılmana gerek yok."))
-            p.append(str(it.user.id)); db.q("UPDATE giveaways SET participants=? WHERE message_id=?", (json.dumps(p), it.message.id))
+            if str(it.user.id) in p:
+                return await sendv_eph(it, WN("ZATEN KATILDIN", "Bu çekilişe zaten katılmışsın, tekrar katılmana gerek yok."))
+            p.append(str(it.user.id))
+            db.q("UPDATE giveaways SET participants=? WHERE message_id=?", (json.dumps(p), it.message.id))
             nt = gw_start(dict(gw, participants=json.dumps(p)))
-            try: await it.message.edit(content=nt, view=GiveawayPanel(self.bot, nt))
-            except Exception: pass
-            await sendv_eph(it, OK("ÇEKİLİŞE KATILDIN", "Ödül: **" + gw["prize"] + "**\nBol şans, kazananlar duyuruda açıklanacak! 🍀"))
+            try:
+                await it.message.edit(content=nt, view=GiveawayPanel(self.bot, nt))
+            except Exception:
+                pass
+            await sendv_eph(it, OK("ÇEKİLİŞE KATILDIN", "Ödül: **" + gw["prize"] + "**\nBol şans! 🍀"))
+
         async def leave(it):
             gw = db.one("SELECT * FROM giveaways WHERE message_id=?", (it.message.id,))
-            if not gw or gw["status"] != "active": return await sendv_eph(it, ER("ÇEKİLİŞ AKTİF DEĞİL", "Bu çekiliş sona ermiş veya iptal edilmiş."))
+            if not gw or gw["status"] != "active":
+                return await sendv_eph(it, ER("ÇEKİLİŞ AKTİF DEĞİL", "Bu çekiliş sona ermiş veya iptal edilmiş."))
             p = json.loads(gw["participants"])
-            if str(it.user.id) not in p: return await sendv_eph(it, WN("KATILMAMIŞSIN", "Bu çekilişte kayıtlı görünmüyorsun."))
-            p.remove(str(it.user.id)); db.q("UPDATE giveaways SET participants=? WHERE message_id=?", (json.dumps(p), it.message.id))
+            if str(it.user.id) not in p:
+                return await sendv_eph(it, WN("KATILMAMIŞSIN", "Bu çekilişte kayıtlı görünmüyorsun."))
+            p.remove(str(it.user.id))
+            db.q("UPDATE giveaways SET participants=? WHERE message_id=?", (json.dumps(p), it.message.id))
+            nt = gw_start(dict(gw, participants=json.dumps(p)))
+            try:
+                await it.message.edit(content=nt, view=GiveawayPanel(self.bot, nt))
+            except Exception:
+                pass
             await sendv_eph(it, WN("ÇEKİLİŞTEN AYRILDIN", "Katılımın silindi. İstersen **Katıl** butonuyla tekrar girebilirsin."))
-        async def end(it):
-            if not it.user.guild_permissions.administrator: return await sendv_eph(it, ER("YETKİ YOK", "Bu işlemi yapmak için gerekli yetkiye sahip değilsin."))
-            await finalize_giveaway(self.bot, it.message.id); await sendv_eph(it, OK("ÇEKİLİŞ BİTİRİLDİ", "Kazananlar belirlendi ve çekiliş kanalında duyuruldu. 🎉"))
-        async def rr(it):
-            if not it.user.guild_permissions.administrator: return await sendv_eph(it, ER("YETKİ YOK", "Bu işlemi yapmak için gerekli yetkiye sahip değilsin."))
-            gw = db.one("SELECT * FROM giveaways WHERE message_id=?", (it.message.id,))
-            if not gw: return
-            p = json.loads(gw["participants"])
-            if not p: return await sendv_eph(it, ER("KATILIMCI YOK", "Bu çekilişe henüz kimse katılmamış, yeniden çekilemez."))
-            w = self.bot.get_user(int(random.choice(p)))
-            await rp_ch(it.channel, head("dice", "YENİDEN ÇEKİLİŞ") + "\n\n" + e("party") + " Yeni kazanan: " + (w.mention if w else "?") + "\nTebrikler! 🎉"); await it.response.defer()
-        async def ext(it):
-            if not it.user.guild_permissions.administrator: return await sendv_eph(it, ER("YETKİ YOK", "Bu işlemi yapmak için gerekli yetkiye sahip değilsin."))
-            gw = db.one("SELECT * FROM giveaways WHERE message_id=?", (it.message.id,))
-            if not gw or gw["status"] != "active": return await sendv_eph(it, ER("ÇEKİLİŞ AKTİF DEĞİL", "Bu çekiliş sona ermiş veya iptal edilmiş."))
-            nw = gw["end_time"] + 3600; db.q("UPDATE giveaways SET end_time=? WHERE message_id=?", (nw, it.message.id))
-            nt = gw_start(dict(gw, end_time=nw))
-            try: await it.message.edit(content=nt, view=GiveawayPanel(self.bot, nt))
-            except Exception: pass
-            await sendv_eph(it, OK("SÜRE UZATILDI", "Çekilişin bitiş zamanı **+1 saat** ertelendi. ⏰"))
-        async def can(it):
-            if not it.user.guild_permissions.administrator: return await sendv_eph(it, ER("YETKİ YOK", "Bu işlemi yapmak için gerekli yetkiye sahip değilsin."))
-            gw = db.one("SELECT * FROM giveaways WHERE message_id=?", (it.message.id,))
-            if not gw: return
-            db.q("UPDATE giveaways SET status='cancelled' WHERE message_id=?", (it.message.id,))
-            try: await it.message.edit(content=ER("İPTAL", gw["prize"]), view=None)
-            except Exception: pass
-            await sendv_eph(it, WN("ÇEKİLİŞ İPTAL EDİLDİ", "Bu çekiliş iptal edildi, kazanan seçilmeyecek."))
+
         self.btn("Katıl", join, style=discord.ButtonStyle.success, emoji=e("party"), cid="kg_join", row=0)
         self.btn("Ayrıl", leave, style=discord.ButtonStyle.secondary, cid="kg_leave", row=0)
-        self.btn("Bitir", end, emoji="🏁", cid="kg_end", row=1)
-        self.btn("Yeniden Çek", rr, style=discord.ButtonStyle.secondary, emoji=e("dice"), cid="kg_rr", row=1)
-        self.btn("+1 Saat", ext, style=discord.ButtonStyle.success, emoji=e("time"), cid="kg_ext", row=1)
-        self.btn("İptal", can, style=discord.ButtonStyle.danger, cid="kg_can", row=1)
+
+
 class GwJumpPanel(Panel):
+
     def __init__(self, text, url):
         super().__init__(text, timeout=None); self.btn_url("Çekilişe Git", url, emoji=e("link"))
 
@@ -1473,7 +1577,7 @@ async def finalize_giveaway(bot, mid):
 bot = KatreBot()
 
 # ═══════════════════════════════════════════════════════════════════
-#  💧 BÖLÜM 2/2 — KOMUTLAR (v5.3 • dengeli, açıklayıcı, düzenli cevaplar)
+#  💧 BÖLÜM 2/2 — KOMUTLAR (v5.6 • AI resim • çekiliş yönetimi • dengeli, açıklayıcı cevaplar)
 # ═══════════════════════════════════════════════════════════════════
 def tip(t): return "\n💡 *" + t + "*"
 def medal(i): return ["🥇", "🥈", "🥉"][i] if i < 3 else "**" + str(i + 1) + ".**"
@@ -2274,36 +2378,163 @@ async def eş(ctx, u: discord.Member = None):
     if not m: return await rp(ctx, WN("BEKAR", u.mention + " şu an evli değil." + tip("Evlenmek için `k!evlen @üye`")))
     await rp(ctx, head("ring", "EVLİLİK DURUMU") + "\n\n" + u.mention + " 💍 <@" + str(m["user2"] if m["user1"] == u.id else m["user1"]) + ">\nEvlilik tarihi: " + str(m["since"])[:10])
 
+def giveaway_can_manage(ctx, gw):
+    return bool(gw and (gw["host"] == ctx.author.id or ctx.author.guild_permissions.administrator))
+
+
 @kategori("give")
 @bot.command(name="çekiliş", aliases=["cekilis"], help="<süre> <kazanan> <ödül>")
 @commands.has_permissions(administrator=True)
 async def çekiliş(ctx, s: str, k: int, *, ö):
-    try: dk = parse_sure(s)
-    except Exception: return await rp(ctx, ER("GEÇERSİZ SÜRE", "Süreyi şöyle yaz: `30m`, `1h`, `2d`.\nÖrnek: `k!çekiliş 60m 1 Nitro`"))
-    if dk < 1 or k < 1: return await rp(ctx, ER("GEÇERSİZ DEĞER", "Süre ve kazanan sayısı en az **1** olmalı."))
+    try:
+        dk = parse_sure(s)
+    except Exception:
+        return await rp(ctx, ER("GEÇERSİZ SÜRE", "Süreyi şöyle yaz: `30m`, `1h`, `2d`.\nÖrnek: `k!çekiliş 60m 1 Nitro`"))
+    if dk < 1 or k < 1:
+        return await rp(ctx, ER("GEÇERSİZ DEĞER", "Süre ve kazanan sayısı en az **1** olmalı."))
+    ö = ö.strip()
+    if not ö:
+        return await rp(ctx, ER("ÖDÜL EKSİK", "Çekiliş için bir ödül yazmalısın."))
     end = datetime.datetime.now() + datetime.timedelta(minutes=dk)
     gw = {"prize": ö, "winners": k, "end_time": end.timestamp(), "host": ctx.author.id, "participants": "[]"}
-    t = gw_start(gw); msg = await rp(ctx, t, GiveawayPanel(bot, t))
-    db.q("INSERT INTO giveaways(message_id,guild_id,channel_id,prize,winners,end_time,host) VALUES(?,?,?,?,?,?,?)", (msg.id, ctx.guild.id, ctx.channel.id, ö, k, end.timestamp(), ctx.author.id))
+    t = gw_start(gw)
+    msg = await rp(ctx, t, GiveawayPanel(bot, t))
+    if not msg:
+        return
+    db.q(
+        "INSERT INTO giveaways(message_id,guild_id,channel_id,prize,winners,end_time,host) VALUES(?,?,?,?,?,?,?)",
+        (msg.id, ctx.guild.id, ctx.channel.id, ö, k, end.timestamp(), ctx.author.id)
+    )
+    await rp(ctx, OK("ÇEKİLİŞ OLUŞTURULDU", "Çekiliş mesajı oluşturuldu. Yönetim için `k!çekilişdüzenle`, `k!çekilişbitir`, `k!çekilişiptal` ve `k!çekilişyenile` komutlarını kullanabilirsin."))
+
+
 @kategori("give")
 @bot.command(name="çekilişler", help="Aktifler")
 async def çekilişler(ctx):
     rs = db.all("SELECT * FROM giveaways WHERE guild_id=? AND status='active'", (ctx.guild.id,))
-    if not rs: return await rp(ctx, WN("AKTİF ÇEKİLİŞ YOK", "Şu an devam eden bir çekiliş bulunmuyor."))
-    await rp(ctx, head("give", "AKTİF ÇEKİLİŞLER") + "\n\n" + "\n".join(e("arrow") + " **" + g["prize"] + "** ─ bitiş <t:" + str(int(g["end_time"])) + ":R>" for g in rs))
+    if not rs:
+        return await rp(ctx, WN("AKTİF ÇEKİLİŞ YOK", "Şu an devam eden bir çekiliş bulunmuyor."))
+    await rp(ctx, head("give", "AKTİF ÇEKİLİŞLER") + "\n\n" + "\n".join(
+        e("arrow") + " **" + g["prize"] + "** ─ bitiş <t:" + str(int(g["end_time"])) + ":R> ─ ID `" + str(g["message_id"]) + "`"
+        for g in rs
+    ))
+
+
+@kategori("give")
+@bot.command(name="çekilişdüzenle", aliases=["cekilisdüzenle"], help="<id> <süre> <kazanan> <ödül>")
+async def çekilişdüzenle(ctx, m: int, s: str, k: int, *, ö):
+    g = db.one("SELECT * FROM giveaways WHERE message_id=? AND guild_id=?", (m, ctx.guild.id))
+    if not g:
+        return await rp(ctx, ER("ÇEKİLİŞ BULUNAMADI", "Bu ID ile bu sunucuda çekiliş bulunamadı."))
+    if not giveaway_can_manage(ctx, g):
+        return await rp(ctx, ER("YETKİ YOK", "Bu çekilişi yalnızca **oluşturan kişi** veya **sunucu yöneticileri** düzenleyebilir."))
+    if g["status"] != "active":
+        return await rp(ctx, ER("ÇEKİLİŞ AKTİF DEĞİL", "Sadece devam eden çekilişler düzenlenebilir."))
+    try:
+        dk = parse_sure(s)
+    except Exception:
+        return await rp(ctx, ER("GEÇERSİZ SÜRE", "Süre örnekleri: `30m`, `1h`, `2d`."))
+    if dk < 1 or k < 1:
+        return await rp(ctx, ER("GEÇERSİZ DEĞER", "Süre ve kazanan sayısı en az **1** olmalı."))
+    ö = ö.strip()
+    if not ö:
+        return await rp(ctx, ER("ÖDÜL EKSİK", "Yeni ödülü yazmalısın."))
+    end = datetime.datetime.now() + datetime.timedelta(minutes=dk)
+    db.q("UPDATE giveaways SET prize=?, winners=?, end_time=? WHERE message_id=?", (ö, k, end.timestamp(), m))
+    ng = db.one("SELECT * FROM giveaways WHERE message_id=?", (m,))
+    try:
+        msg = await ctx.channel.fetch_message(m)
+        await msg.edit(content=gw_start(ng), view=GiveawayPanel(bot, gw_start(ng)))
+    except Exception as ex:
+        return await rp(ctx, WN("VERİ GÜNCELLENDİ", "Çekiliş veritabanında güncellendi fakat mesaj düzenlenemedi.\n`" + str(ex)[:120] + "`"))
+    await rp(ctx, OK("ÇEKİLİŞ DÜZENLENDİ", "**Ödül:** " + ö + "\n**Kazanan:** " + str(k) + " kişi\n**Yeni bitiş:** <t:" + str(int(end.timestamp())) + ":F>"))
+
+
 @kategori("give")
 @bot.command(name="çekilişbitir", help="<id>")
-@commands.has_permissions(administrator=True)
 async def çekilişbitir(ctx, m: int):
     g = db.one("SELECT * FROM giveaways WHERE message_id=? AND guild_id=?", (m, ctx.guild.id))
-    if not g or g["status"] != "active": return await rp(ctx, ER("ÇEKİLİŞ BULUNAMADI", "Bu ID ile aktif bir çekiliş yok.\nÇekiliş mesajına sağ tıklayıp **ID'yi Kopyala** diyebilirsin."))
-    await finalize_giveaway(bot, m); await rp(ctx, OK("ÇEKİLİŞ BİTİRİLDİ", "Kazananlar belirlendi ve duyuruldu. 🎉"))
+    if not g or g["status"] != "active":
+        return await rp(ctx, ER("ÇEKİLİŞ BULUNAMADI", "Bu ID ile aktif bir çekiliş yok."))
+    if not giveaway_can_manage(ctx, g):
+        return await rp(ctx, ER("YETKİ YOK", "Bu çekilişi yalnızca **oluşturan kişi** veya **sunucu yöneticileri** bitirebilir."))
+    await finalize_giveaway(bot, m)
+    await rp(ctx, OK("ÇEKİLİŞ BİTİRİLDİ", "Kazananlar belirlendi ve duyuruldu. 🎉"))
 
+
+@kategori("give")
+@bot.command(name="çekilişiptal", aliases=["cekilisiptal"], help="<id>")
+async def çekilişiptal(ctx, m: int):
+    g = db.one("SELECT * FROM giveaways WHERE message_id=? AND guild_id=?", (m, ctx.guild.id))
+    if not g or g["status"] != "active":
+        return await rp(ctx, ER("ÇEKİLİŞ BULUNAMADI", "Bu ID ile aktif bir çekiliş yok."))
+    if not giveaway_can_manage(ctx, g):
+        return await rp(ctx, ER("YETKİ YOK", "Bu çekilişi yalnızca **oluşturan kişi** veya **sunucu yöneticileri** iptal edebilir."))
+    db.q("UPDATE giveaways SET status='cancelled' WHERE message_id=?", (m,))
+    try:
+        msg = await ctx.channel.fetch_message(m)
+        await msg.edit(content=ER("ÇEKİLİŞ İPTAL EDİLDİ", "**" + g["prize"] + "**\nBu çekiliş iptal edildi; artık katılım alınmıyor."), view=None)
+    except Exception:
+        pass
+    await rp(ctx, WN("ÇEKİLİŞ İPTAL EDİLDİ", "Çekiliş iptal edildi ve kazanan seçilmeyecek."))
+
+
+@kategori("give")
+@bot.command(name="çekilişyenile", aliases=["cekilisyenile"], help="<id>")
+async def çekilişyenile(ctx, m: int):
+    g = db.one("SELECT * FROM giveaways WHERE message_id=? AND guild_id=?", (m, ctx.guild.id))
+    if not g or g["status"] != "ended":
+        return await rp(ctx, ER("YENİDEN ÇEKİLEMEZ", "Bu komut yalnızca tamamlanmış çekilişlerde kullanılabilir."))
+    if not giveaway_can_manage(ctx, g):
+        return await rp(ctx, ER("YETKİ YOK", "Bu çekilişi yalnızca **oluşturan kişi** veya **sunucu yöneticileri** yeniden çekebilir."))
+    p = json.loads(g["participants"])
+    if not p:
+        return await rp(ctx, ER("KATILIMCI YOK", "Yeniden çekiliş için kayıtlı katılımcı bulunmuyor."))
+    winner_id = random.choice(p)
+    w = bot.get_user(int(winner_id))
+    mention = w.mention if w else "<@" + str(winner_id) + ">"
+    await rp_ch(ctx.channel, head("dice", "YENİDEN ÇEKİLİŞ") + "\n\n" + e("party") + " Yeni kazanan: " + mention + "\nTebrikler! 🎉")
+    await rp(ctx, OK("YENİ KAZANAN BELİRLENDİ", mention + " yeni kazanan olarak seçildi."))
+
+@kategori("genel")
+@bot.command(name="resim", aliases=["image", "img"], help="<prompt> — AI ile görsel oluştur")
+@commands.cooldown(1, 8, commands.BucketType.user)
+async def resim(ctx, *, prompt: str):
+    prompt = prompt.strip()
+    if not prompt:
+        return await rp(ctx, ER("PROMPT EKSİK", "Ne oluşturulacağını yazmalısın.\nÖrnek: `k!resim İstanbul'da neon ışıklı cyberpunk kedi`"))
+    if len(prompt) > 4000:
+        return await rp(ctx, ER("PROMPT ÇOK UZUN", "Prompt en fazla **4000 karakter** olabilir."))
+
+    if not OPENAI_API_KEY:
+        return await rp(ctx, ER("AI AYARLANMADI", "Sunucu yöneticisi `OPENAI_API_KEY` ortam değişkenini ayarlamalı."))
+
+    ok, count, pro_user = await ai_image_reserve(ctx.author.id)
+    if not ok:
+        return await rp(ctx, WN("GÜNLÜK AI LİMİTİ DOLDU", "Free üyeler `k!resim` komutunu günde **" + str(AI_FREE_DAILY_LIMIT) + " kez** kullanabilir.\nBugünkü hakkın bitti; Pro üyelerde limit **sınırsızdır**. 💎"))
+
+    status = "Pro • sınırsız" if pro_user else "Free • bugün " + str(count) + "/" + str(AI_FREE_DAILY_LIMIT)
+    await rp(ctx, head("spark", "AI RESİM OLUŞTURULUYOR") + "\n\nPrompt: **" + prompt[:800] + "**\n" + e("dot") + " Plan: **" + status + "**\n\nBiraz bekle, görsel hazırlanıyor... 🎨")
+
+    try:
+        image_bytes = await openai_generate_image(prompt)
+        if not image_bytes:
+            raise RuntimeError("Boş görsel verisi döndü.")
+        file = discord.File(io.BytesIO(image_bytes), filename="katre-ai.png")
+        await ctx.send(content=head("spark", "AI RESİM HAZIR") + "\n\n" + e("dot") + " Prompt: **" + prompt[:800] + "**\n" + e("diamond") + " Plan: **" + status + "**", file=file)
+    except Exception as ex:
+        await ai_image_refund(ctx.author.id)
+        msg = str(ex)
+        if "401" in msg or "Incorrect API key" in msg:
+            msg = "OpenAI API anahtarı geçersiz veya yetkisiz."
+        elif "429" in msg:
+            msg = "OpenAI API kullanım/billing limiti nedeniyle istek reddedildi."
+        await rp(ctx, ER("AI RESİM OLUŞTURULAMADI", msg[:700] + "\n\nKullanım hakkın başarısız üretim nedeniyle geri verildi."))
 @kategori("pro")
 @bot.command(name="pro", help="Durum + ayrıcalıklar")
 async def pro(ctx, u: discord.Member = None):
     u = u or ctx.author; ensure_user(u.id, str(u)); d = db.one("SELECT * FROM users WHERE user_id=?", (u.id,))
-    await rp(ctx, head("pro", "KATRE PRO") + "\n\nDurum: **" + ("PRO ÜYE ✅" if d["pro"] else "Pro değil") + "**\n\n" + e("arrow") + " Özel ses odası\n" + e("arrow") + " Renkli PRO rolü\n" + e("arrow") + " 12 saatte bir **+500 coin**\n" + e("arrow") + " Saatlik şans oyunu ve **2x XP**\n\nKomutlar: `prooda` `prorol` `probonus` `proşans` `probanner` `prorenk` `protag` `proxp`")
+    await rp(ctx, head("pro", "KATRE PRO") + "\n\nDurum: **" + ("PRO ÜYE ✅" if d["pro"] else "Pro değil") + "**\n\n" + e("arrow") + " Özel ses odası\n" + e("arrow") + " Renkli PRO rolü\n" + e("arrow") + " 12 saatte bir **+500 coin**\n" + e("arrow") + " Saatlik şans oyunu ve **2x XP**\n" + e("arrow") + " AI resim: **" + ("Sınırsız" if ai_is_pro(u.id) else "Free " + ai_image_remaining(u.id) + " hak kaldı") + "**\n\nKomutlar: `prooda` `prorol` `probonus` `proşans` `probanner` `prorenk` `protag` `proxp`")
 @kategori("pro")
 @bot.command(name="prooda", help="Özel oda")
 @is_pro()
@@ -2606,7 +2837,7 @@ async def eval_cmd(ctx, *, code):
     except Exception as ex: await ctx.send("```py\n" + str(ex)[:1900] + "\n```")
 
 # ═══════════════════════════════════════════════════════════════════
-# 🆕 v5.5 YENİ KOMUTLAR
+# 🆕 v5.6 YENİ KOMUTLAR
 # ═══════════════════════════════════════════════════════════════════
 import ast, operator
 _CALC_OPS = {ast.Add: operator.add, ast.Sub: operator.sub, ast.Mult: operator.mul, ast.Div: operator.truediv, ast.FloorDiv: operator.floordiv, ast.Mod: operator.mod, ast.Pow: operator.pow, ast.USub: operator.neg, ast.UAdd: operator.pos}
