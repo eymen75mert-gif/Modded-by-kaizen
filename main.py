@@ -3608,4 +3608,4 @@ async def saril(ctx, u: discord.Member):
 # 🚀 BAŞLAT
 # ═══════════════════════════════════════════════════════════════════
 if __name__ == "__main__":
-    bot.run(BOT_TOKEN
+    bot.run(BOT_TOKEN)
