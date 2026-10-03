@@ -50,8 +50,13 @@ BACKUP_CH = int(os.getenv("BACKUP_CHANNEL_ID", "0"))
 MARKER = "#KATRE_YEDEK"
 DIV = "──────────────────────────────"
 PAGE_SIZE = 15
-BOT_VERSION = "6.4"
+BOT_VERSION = "6.5"
 CHANGELOG = {
+    "6.5": [
+        "📣 Reklam / zorunlu sunucu sistemi eklendi: Owner panelinden tamamen butonlarla açılıp kapatılabilir.",
+        "🔐 Belirlenen sunucuya katılmayan kullanıcılar komutları kullanamaz; otomatik uyarı ve davet butonu görür.",
+        "🛠️ `k!reklam` yalnızca Bot Owner tarafından kullanılabilir; sunucu, davet ve uyarı metni panelden ayarlanır.",
+    ],
     "6.3": [
         "📚 Full log kapsamı genişletildi: ban/unban, timeout, üye rol/nick değişimi, kanal/rol, davet, webhook, thread, emoji/sticker ve komut olayları",
         "🧪 `k!logtest`, `k!logkapat`, `k!logtemizle` ve `k!logdetay` eklendi",
@@ -136,6 +141,7 @@ class DB:
         CREATE TABLE IF NOT EXISTS servers(guild_id INTEGER PRIMARY KEY, prefix TEXT DEFAULT 'k!', welcome_ch INTEGER, leave_ch INTEGER, auto_role INTEGER, rank_on INTEGER DEFAULT 1, joined_at TEXT, welcome_message TEXT, leave_message TEXT);
         CREATE TABLE IF NOT EXISTS users(user_id INTEGER PRIMARY KEY, name TEXT, xp INTEGER DEFAULT 0, level INTEGER DEFAULT 1, coins INTEGER DEFAULT 0, messages INTEGER DEFAULT 0, warnings INTEGER DEFAULT 0, pro INTEGER DEFAULT 0, pro_expiry TEXT, pro_color TEXT, pro_tag TEXT, xp2 INTEGER DEFAULT 0, birthday TEXT, notes TEXT DEFAULT '[]', rep INTEGER DEFAULT 0);
         CREATE TABLE IF NOT EXISTS owner_settings(id INTEGER PRIMARY KEY DEFAULT 1, maintenance INTEGER DEFAULT 0);
+        CREATE TABLE IF NOT EXISTS required_guild(id INTEGER PRIMARY KEY DEFAULT 1, enabled INTEGER DEFAULT 0, guild_id INTEGER DEFAULT 0, invite_url TEXT DEFAULT '', message TEXT DEFAULT '💧 Katre Bot komutlarını kullanabilmek için aşağıdaki sunucuya katılmalısın.');
         CREATE TABLE IF NOT EXISTS bot_meta(key TEXT PRIMARY KEY, value TEXT);
         CREATE TABLE IF NOT EXISTS half_owners(user_id INTEGER PRIMARY KEY, since TEXT, added_by INTEGER);
         CREATE TABLE IF NOT EXISTS giveaways(message_id INTEGER PRIMARY KEY, guild_id INTEGER, channel_id INTEGER, prize TEXT, winners INTEGER, end_time REAL, participants TEXT DEFAULT '[]', status TEXT DEFAULT 'active', host INTEGER);\n        CREATE TABLE IF NOT EXISTS ai_usage(user_id INTEGER NOT NULL, usage_day TEXT NOT NULL, uses INTEGER DEFAULT 0, PRIMARY KEY(user_id, usage_day));
@@ -165,7 +171,8 @@ class DB:
         CREATE TABLE IF NOT EXISTS punish_config(guild_id INTEGER PRIMARY KEY, mute_at INTEGER DEFAULT 3, ban_at INTEGER DEFAULT 5);
         CREATE TABLE IF NOT EXISTS polls(id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id INTEGER, channel_id INTEGER, message_id INTEGER DEFAULT 0, question TEXT, options TEXT, votes TEXT DEFAULT '{}', status TEXT DEFAULT 'active', creator INTEGER, ts TEXT);
         CREATE TABLE IF NOT EXISTS wordgame(guild_id INTEGER PRIMARY KEY, channel_id INTEGER, last_word TEXT, last_user INTEGER, streak INTEGER DEFAULT 0);
-        INSERT OR IGNORE INTO owner_settings(id) VALUES (1);""")
+        INSERT OR IGNORE INTO owner_settings(id) VALUES (1);
+        INSERT OR IGNORE INTO required_guild(id,enabled,guild_id,invite_url,message) VALUES (1,0,0,'','💧 Katre Bot komutlarını kullanabilmek için aşağıdaki sunucuya katılmalısın.');""")
         for t, col, ty in (("servers","leave_ch","INTEGER"),("servers","welcome_message","TEXT"),("servers","leave_message","TEXT"),("users","pro_tag","TEXT"),("users","xp2","INTEGER DEFAULT 0"),("tickets","claimed_by","INTEGER"),("afk","mentions","INTEGER DEFAULT 0"),("tickets","subject","TEXT"),("tickets","category","TEXT"),("tickets","created_at","TEXT"),("tickets","number","INTEGER"),("tickets","description","TEXT"),("tickets","priority","TEXT DEFAULT 'normal'"),("role_menus","channel_id","INTEGER"),("role_menus","message_id","INTEGER"),("role_menus","title","TEXT")):
             try: c.execute("ALTER TABLE " + t + " ADD COLUMN " + col + " " + ty)
             except sqlite3.OperationalError: pass
@@ -598,6 +605,7 @@ async def check_update(bot):
 
 class OwnerOnly(commands.CheckFailure): pass
 class ProOnly(commands.CheckFailure): pass
+class RequiredGuildMember(commands.CheckFailure): pass
 
 AI_IMAGE_LOCK = asyncio.Lock()
 
@@ -1438,7 +1446,7 @@ class KatreBot(commands.Bot):
         return list(prefixes)
     async def setup_hook(self):
         self.gwv = GiveawayPanel(self, " ")
-        for v in (self.gwv, TicketOpenView(), TicketActionView(), AppOpenPanel(" "), HelpPanel(self, " "), OwnerPanel(self, " ")): self.add_view(v)
+        for v in (self.gwv, TicketOpenView(), TicketActionView(), AppOpenPanel(" "), HelpPanel(self, " "), OwnerPanel(self, " "), ReklamPanel()): self.add_view(v)
         if V2_OK:
             for mk in (lambda: help_v2(self, " "),):
                 try: self.add_view(mk())
@@ -1621,6 +1629,7 @@ class KatreBot(commands.Bot):
         except Exception: traceback.print_exc()
     async def on_message(self, m):
         if m.author.bot: return
+        blocked_by_required_server = False
         try:
             prefs = await self.get_prefix(m)
             is_command_message = bool(m.content and any(m.content.startswith(p) for p in prefs))
@@ -1633,6 +1642,14 @@ class KatreBot(commands.Bot):
                         except Exception: pass
                 return
             if db.one("SELECT 1 FROM blacklist WHERE user_id=?", (m.author.id,)): return
+            if is_command_message and m.author.id != OWNER_ID and not await required_guild_member(m.author.id):
+                blocked_by_required_server = True
+                nw = time.time()
+                if nw - REQUIRED_WARN_CD.get(m.author.id, 0) > 20:
+                    REQUIRED_WARN_CD[m.author.id] = nw
+                    try: await send_required_guild_warning(m.channel)
+                    except Exception: pass
+                return
         except Exception: pass
         try:
             a = db.one("SELECT * FROM afk WHERE user_id=?", (m.author.id,))
@@ -1683,7 +1700,8 @@ class KatreBot(commands.Bot):
                     db.q("UPDATE users SET xp=?,level=? WHERE user_id=?", (xp, lv, m.author.id))
         except Exception: traceback.print_exc()
         finally:
-            await self.process_commands(m)
+            if not blocked_by_required_server:
+                await self.process_commands(m)
     async def on_voice_state_update(self, member, before, after):
         try:
             g = member.guild
@@ -1853,6 +1871,8 @@ class KatreBot(commands.Bot):
             await guild_log_send(ctx.guild, head("terminal", "KOMUT KULLANILDI") + "\n\nKullanıcı: " + ctx.author.mention + " • ID: `" + str(ctx.author.id) + "`\nKanal: " + ctx.channel.mention + "\nKomut: `" + ctx.message.content[:500].replace("`", "ˋ") + "`", "command")
     async def on_command_error(self, ctx, er):
         if isinstance(er, OwnerOnly): return
+        if isinstance(er, RequiredGuildMember):
+            await send_required_guild_warning(ctx.channel); return
         if isinstance(er, ProOnly):
             v = Panel(head("pro", "PRO GEREKLİ") + "\n\nBu komut sadece PRO üyelere özel.\n📋 `k!pro` • 💎 `k!probonus`")
             v.btn_url("Pro Destek", SUPPORT_URL, emoji=e("diamond"))
@@ -1961,6 +1981,159 @@ async def finalize_giveaway(bot, mid):
             except Exception: pass
 
 bot = KatreBot()
+
+# ═══════════════════════════════════════════════════════════════════
+# 📣 v6.5 — REKLAM / ZORUNLU SUNUCU SİSTEMİ
+# ═══════════════════════════════════════════════════════════════════
+REQUIRED_MEMBER_CACHE = {}
+REQUIRED_WARN_CD = {}
+
+def required_guild_settings():
+    r = db.one("SELECT * FROM required_guild WHERE id=1")
+    if not r:
+        db.q("INSERT OR IGNORE INTO required_guild(id,enabled,guild_id,invite_url,message) VALUES(1,0,0,'','💧 Katre Bot komutlarını kullanabilmek için aşağıdaki sunucuya katılmalısın.')")
+        r = db.one("SELECT * FROM required_guild WHERE id=1")
+    return r
+
+def _valid_invite_url(url):
+    u = str(url or "").strip()
+    return u.startswith("https://discord.gg/") or u.startswith("https://discord.com/invite/")
+
+def required_guild_panel_text():
+    r = required_guild_settings()
+    gid = int(r.get("guild_id") or 0)
+    g = bot.get_guild(gid) if gid else None
+    durum = "🟢 AÇIK" if r.get("enabled") else "🔴 KAPALI"
+    sunucu = (g.name + " (`" + str(g.id) + "`)") if g else ("`" + str(gid) + "` • Bot bu sunucuda değil" if gid else "Ayarlanmadı")
+    davet = r.get("invite_url") or "Ayarlanmadı"
+    return head("owner", "REKLAM / ZORUNLU SUNUCU PANELİ") + "\n\n" + KV([
+        (e("shield") + "Durum", durum),
+        (e("home") + "Hedef sunucu", sunucu),
+        (e("link") + "Davet", davet[:90]),
+        (e("warn") + "Kural", "Hedef sunucuya katılmayan kullanıcılar komutları kullanamaz."),
+    ]) + "\n\n**Uyarı mesajı**\n" + _q(str(r.get("message") or "—")[:800])
+
+class ReklamGuildModal(Modal, title="Zorunlu Sunucu Ayarla"):
+    guild_id = TextInput(label="Sunucu ID", placeholder="123456789012345678", max_length=25)
+    invite = TextInput(label="Davet linki (opsiyonel)", placeholder="https://discord.gg/....", required=False, max_length=200)
+    async def on_submit(self, it):
+        try: gid = int(self.guild_id.value.strip())
+        except Exception: return await sendv_eph(it, ER("GEÇERSİZ SUNUCU ID", "Geçerli bir Discord sunucu ID'si girmelisin."))
+        g = bot.get_guild(gid)
+        if not g: return await sendv_eph(it, ER("SUNUCU BULUNAMADI", "Katre Bot bu sunucuda bulunmuyor. Önce botu hedef sunucuya ekle."))
+        inv = self.invite.value.strip()
+        if inv and not _valid_invite_url(inv): return await sendv_eph(it, ER("GEÇERSİZ DAVET", "Davet `https://discord.gg/...` veya `https://discord.com/invite/...` formatında olmalı."))
+        old = required_guild_settings()
+        if not inv: inv = old.get("invite_url") or ""
+        db.q("UPDATE required_guild SET guild_id=?, invite_url=? WHERE id=1", (gid, inv))
+        REQUIRED_MEMBER_CACHE.clear(); REQUIRED_WARN_CD.clear()
+        await sendv_eph(it, OK("HEDEF SUNUCU AYARLANDI", "Artık hedef sunucu: **" + g.name + "** (`" + str(g.id) + "`).\nSistem şu an **" + ("açık" if old.get("enabled") else "kapalı") + "** durumda."))
+
+class ReklamInviteModal(Modal, title="Davet Linki Ayarla"):
+    invite = TextInput(label="Discord davet linki", placeholder="https://discord.gg/....", max_length=200)
+    async def on_submit(self, it):
+        inv = self.invite.value.strip()
+        if not _valid_invite_url(inv): return await sendv_eph(it, ER("GEÇERSİZ DAVET", "`https://discord.gg/...` veya `https://discord.com/invite/...` kullan."))
+        db.q("UPDATE required_guild SET invite_url=? WHERE id=1", (inv,))
+        await sendv_eph(it, OK("DAVET LİNKİ AYARLANDI", "Katılmayan kullanıcılara **Sunucuya Katıl** butonu gösterilecek."))
+
+class ReklamMessageModal(Modal, title="Uyarı Mesajını Düzenle"):
+    message = TextInput(label="Uyarı mesajı", style=discord.TextStyle.paragraph, max_length=1000, placeholder="Komutları kullanabilmek için önce sunucumuza katılmalısın.")
+    async def on_submit(self, it):
+        msg = self.message.value.strip()
+        if not msg: return await sendv_eph(it, ER("MESAJ BOŞ", "Bir uyarı mesajı yazmalısın."))
+        db.q("UPDATE required_guild SET message=? WHERE id=1", (msg,))
+        await sendv_eph(it, OK("UYARI MESAJI GÜNCELLENDİ", "Yeni mesaj kaydedildi."))
+
+class ReklamPanel(Panel):
+    def __init__(self):
+        super().__init__(required_guild_panel_text(), timeout=None)
+        async def owner_only(it):
+            if it.user.id != OWNER_ID:
+                await sendv_eph(it, ER("YETKİ YOK", "Bu paneli yalnızca Bot Owner kullanabilir.")); return False
+            return True
+        async def ac(it):
+            if not await owner_only(it): return
+            r = required_guild_settings(); gid = int(r.get("guild_id") or 0); g = bot.get_guild(gid) if gid else None
+            if not g: return await sendv_eph(it, ER("HEDEF SUNUCU YOK", "Önce **Sunucu Ayarla** butonuyla botun bulunduğu bir sunucu seç."))
+            db.q("UPDATE required_guild SET enabled=1 WHERE id=1", ()); REQUIRED_MEMBER_CACHE.clear()
+            self.text = required_guild_panel_text()
+            await sendv_eph(it, OK("REKLAM SİSTEMİ AÇILDI", "`" + g.name + "` sunucusuna katılmayan kullanıcıların komut kullanması artık engellenecek."))
+            try: await it.message.edit(content=self.text, view=self)
+            except Exception: pass
+        async def kapa(it):
+            if not await owner_only(it): return
+            db.q("UPDATE required_guild SET enabled=0 WHERE id=1"); REQUIRED_MEMBER_CACHE.clear()
+            self.text = required_guild_panel_text()
+            await sendv_eph(it, OK("REKLAM SİSTEMİ KAPATILDI", "Zorunlu sunucu kontrolü devre dışı."))
+            try: await it.message.edit(content=self.text, view=self)
+            except Exception: pass
+        async def durum(it):
+            if not await owner_only(it): return
+            await sendv_eph(it, required_guild_panel_text())
+        async def sunucu(it):
+            if not await owner_only(it): return
+            await it.response.send_modal(ReklamGuildModal())
+        async def davet(it):
+            if not await owner_only(it): return
+            await it.response.send_modal(ReklamInviteModal())
+        async def mesaj(it):
+            if not await owner_only(it): return
+            await it.response.send_modal(ReklamMessageModal())
+        async def sifirla(it):
+            if not await owner_only(it): return
+            db.q("UPDATE required_guild SET enabled=0, guild_id=0, invite_url='', message=? WHERE id=1", ("💧 Katre Bot komutlarını kullanabilmek için aşağıdaki sunucuya katılmalısın.",))
+            REQUIRED_MEMBER_CACHE.clear(); REQUIRED_WARN_CD.clear(); self.text = required_guild_panel_text()
+            await sendv_eph(it, OK("REKLAM AYARLARI SIFIRLANDI", "Sistem kapatıldı ve hedef sunucu ayarı temizlendi."))
+            try: await it.message.edit(content=self.text, view=self)
+            except Exception: pass
+        self.btn("Aç", ac, style=discord.ButtonStyle.success, emoji="🟢", cid="katre_reklam_open", row=0)
+        self.btn("Kapat", kapa, style=discord.ButtonStyle.danger, emoji="🔴", cid="katre_reklam_close", row=0)
+        self.btn("Durum", durum, style=discord.ButtonStyle.secondary, emoji="📊", cid="katre_reklam_status", row=0)
+        self.btn("Sunucu Ayarla", sunucu, style=discord.ButtonStyle.primary, emoji="🏠", cid="katre_reklam_guild", row=0)
+        self.btn("Davet Ayarla", davet, style=discord.ButtonStyle.primary, emoji="🔗", cid="katre_reklam_invite", row=1)
+        self.btn("Mesajı Değiştir", mesaj, style=discord.ButtonStyle.secondary, emoji="✏️", cid="katre_reklam_message", row=1)
+        self.btn("Sıfırla", sifirla, style=discord.ButtonStyle.danger, emoji="♻️", cid="katre_reklam_reset", row=1)
+
+async def required_guild_member(user_id):
+    if user_id == OWNER_ID: return True
+    r = required_guild_settings()
+    if not r or not r.get("enabled") or not r.get("guild_id"): return True
+    gid = int(r["guild_id"])
+    now = time.time(); key = (user_id, gid)
+    cached = REQUIRED_MEMBER_CACHE.get(key)
+    if cached and now - cached[0] < 45: return cached[1]
+    g = bot.get_guild(gid)
+    if not g:
+        REQUIRED_MEMBER_CACHE[key] = (now, False)
+        return False
+    member = g.get_member(user_id)
+    if member is None:
+        try: member = await g.fetch_member(user_id)
+        except (discord.NotFound, discord.Forbidden, discord.HTTPException): member = None
+    allowed = member is not None
+    REQUIRED_MEMBER_CACHE[key] = (now, allowed)
+    return allowed
+
+async def send_required_guild_warning(channel):
+    r = required_guild_settings(); gid = int(r.get("guild_id") or 0); g = bot.get_guild(gid) if gid else None
+    body = str(r.get("message") or "💧 Katre Bot komutlarını kullanabilmek için önce hedef sunucuya katılmalısın.")
+    if g: body += "\n\n🎯 Hedef sunucu: **" + g.name + "**"
+    body += "\n\nSunucuya katıldıktan sonra komutu tekrar kullanabilirsin."
+    view = Panel(" ", timeout=60)
+    inv = str(r.get("invite_url") or "").strip()
+    if _valid_invite_url(inv): view.btn_url("Sunucuya Katıl", inv, emoji="🔗")
+    msg = await rp_ch(channel, WN("SUNUCUYA KATILMAN GEREKİYOR", body), view if _valid_invite_url(inv) else None)
+    if msg:
+        try: await msg.delete(delay=15)
+        except Exception: pass
+
+async def required_server_check(ctx):
+    if ctx.author.id == OWNER_ID: return True
+    if not await required_guild_member(ctx.author.id): raise RequiredGuildMember()
+    return True
+
+bot.add_check(required_server_check)
 
 # ═══════════════════════════════════════════════════════════════════
 #  💧 BÖLÜM 2/2 — KOMUTLAR (v5.8 • gelişmiş ticket • çekiliş yönetimi • dengeli, açıklayıcı cevaplar)
@@ -3486,6 +3659,11 @@ async def prologlar(ctx, u: discord.User = None):
     rs = db.all("SELECT * FROM pro_logs WHERE user_id=? ORDER BY id DESC LIMIT 15", (u.id,)) if u else db.all("SELECT * FROM pro_logs ORDER BY id DESC LIMIT 15")
     if not rs: return await rp(ctx, WN("KAYIT YOK", "Henüz Pro işlem kaydı bulunmuyor."))
     await rp(ctx, head("log", "PRO İŞLEM KAYITLARI") + "\n\nSon " + str(len(rs)) + " işlem:\n" + "\n".join(e("arrow") + " **" + r["action"] + "** ─ <@" + str(r["user_id"]) + "> ─ " + r["ts"][:10] for r in rs))
+@kategori("owner")
+@bot.command(name="reklam", aliases=["reklampanel", "zorunlusunucu"], help="Butonlu zorunlu sunucu/reklam paneli")
+@is_owner()
+async def reklam(ctx):
+    await rp(ctx, required_guild_panel_text(), ReklamPanel())
 @kategori("owner")
 @bot.command(name="prefix", help="<yeni>")
 @is_owner()
