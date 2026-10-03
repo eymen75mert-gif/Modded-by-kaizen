@@ -1,13 +1,17 @@
 # ═══════════════════════════════════════════════════════════════════
-#  💧 KATRE BOT v5.6 — BÖLÜM 1/2 • AI RESİM • ÇEKİLİŞ YÖNETİMİ • PREMIUM KART • V2 TİCKET • V2 YARDIM
-#  ENV: BOT_TOKEN, OWNER_ID, SUPPORT_URL, BACKUP_CHANNEL_ID, OPENAI_API_KEY, OPENAI_IMAGE_MODEL
-#  requirements.txt: discord.py>=2.6.0
+#  💧 KATRE BOT v5.7 — BÖLÜM 1/2 • AI RESİM • ÇEKİLİŞ YÖNETİMİ • PREMIUM KART • V2 TİCKET • V2 YARDIM
+#  ENV: BOT_TOKEN, OWNER_ID, SUPPORT_URL, BACKUP_CHANNEL_ID, OPENAI_API_KEY, OPENAI_IMAGE_MODEL, HF_TOKEN, HF_IMAGE_MODEL, AI_PROVIDER
+#  requirements.txt: discord.py>=2.6.0, aiohttp>=3.9.0, huggingface_hub>=1.1.2
 # ═══════════════════════════════════════════════════════════════════
 import discord
 from discord.ext import commands, tasks
 from discord.ui import View, Button, Select, Modal, TextInput
 import time, sqlite3, os, sys, json, random, asyncio, datetime, traceback, textwrap, io, re, inspect, urllib.parse, base64
 import aiohttp
+try:
+    from huggingface_hub import InferenceClient
+except Exception:
+    InferenceClient = None
 from collections import deque
 from contextlib import redirect_stdout
 try:
@@ -38,13 +42,26 @@ SUPPORT_URL = os.getenv("SUPPORT_URL", "https://discord.gg/katre")
 DB_PATH = os.getenv("DB_PATH", "katre.db")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
 OPENAI_IMAGE_MODEL = os.getenv("OPENAI_IMAGE_MODEL", "gpt-image-2").strip() or "gpt-image-2"
+HF_TOKEN = os.getenv("HF_TOKEN", "").strip()
+HF_IMAGE_MODEL = os.getenv("HF_IMAGE_MODEL", "black-forest-labs/FLUX.1-schnell").strip() or "black-forest-labs/FLUX.1-schnell"
+AI_PROVIDER = os.getenv("AI_PROVIDER", "auto").strip().lower() or "auto"
 AI_FREE_DAILY_LIMIT = 7
 BACKUP_CH = int(os.getenv("BACKUP_CHANNEL_ID", "0"))
 MARKER = "#KATRE_YEDEK"
 DIV = "──────────────────────────────"
 PAGE_SIZE = 15
-BOT_VERSION = "5.6"
+BOT_VERSION = "5.7"
 CHANGELOG = {
+    "5.7": [
+        "🆓 Free AI görsel sağlayıcısı eklendi: Hugging Face Inference Providers + FLUX.1-schnell",
+        "🤖 `k!resim` artık AI_PROVIDER ile Hugging Face/OpenAI arasında seçim yapabiliyor",
+        "📊 Free günlük **7** kullanım korunuyor; başarısız üretimde hak otomatik iade ediliyor",
+        "💎 Pro kullanıcılarında OpenAI anahtarı varsa premium sağlayıcı önceliklendiriliyor",
+        "🎛️ `k!butonrol` sistemi geliştirildi: rol hiyerarşisi, bot yetkisi, bozuk rol temizliği ve daha güvenli toggle",
+        "🧹 `k!butonrolsil` ve `k!butonrollist` komutları eklendi",
+        "🧩 Rol butonları yeniden başlatmadan sonra kalıcı olarak geri yükleniyor",
+        "🛡️ Buton etkileşimlerinde Discord rol yönetme hataları kullanıcıya açıklanıyor",
+    ],
     "5.6": [
         "🤖 `k!resim <prompt>` eklendi: OpenAI görsel üretimi ile AI resim oluşturur",
         "📊 AI resim kullanım limiti eklendi: Free günlük **7**, Pro **sınırsız**",
@@ -95,7 +112,7 @@ class DB:
         CREATE TABLE IF NOT EXISTS half_owners(user_id INTEGER PRIMARY KEY, since TEXT, added_by INTEGER);
         CREATE TABLE IF NOT EXISTS giveaways(message_id INTEGER PRIMARY KEY, guild_id INTEGER, channel_id INTEGER, prize TEXT, winners INTEGER, end_time REAL, participants TEXT DEFAULT '[]', status TEXT DEFAULT 'active', host INTEGER);\n        CREATE TABLE IF NOT EXISTS ai_usage(user_id INTEGER NOT NULL, usage_day TEXT NOT NULL, uses INTEGER DEFAULT 0, PRIMARY KEY(user_id, usage_day));
         CREATE TABLE IF NOT EXISTS tickets(channel_id INTEGER PRIMARY KEY, guild_id INTEGER, user_id INTEGER, claimed_by INTEGER, status TEXT DEFAULT 'open');
-        CREATE TABLE IF NOT EXISTS role_menus(menu_id TEXT PRIMARY KEY, guild_id INTEGER, role_ids TEXT);
+        CREATE TABLE IF NOT EXISTS role_menus(menu_id TEXT PRIMARY KEY, guild_id INTEGER, channel_id INTEGER, message_id INTEGER, title TEXT, role_ids TEXT);
         CREATE TABLE IF NOT EXISTS blacklist(user_id INTEGER PRIMARY KEY, reason TEXT);
         CREATE TABLE IF NOT EXISTS cmd_stats(cmd TEXT PRIMARY KEY, uses INTEGER DEFAULT 0);
         CREATE TABLE IF NOT EXISTS protections(guild_id INTEGER PRIMARY KEY, anti_spam INTEGER DEFAULT 0, anti_flood INTEGER DEFAULT 0, anti_raid INTEGER DEFAULT 0, anti_link INTEGER DEFAULT 0, badword INTEGER DEFAULT 0, log_ch INTEGER, raid_until REAL DEFAULT 0);
@@ -118,7 +135,7 @@ class DB:
         CREATE TABLE IF NOT EXISTS polls(id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id INTEGER, channel_id INTEGER, message_id INTEGER DEFAULT 0, question TEXT, options TEXT, votes TEXT DEFAULT '{}', status TEXT DEFAULT 'active', creator INTEGER, ts TEXT);
         CREATE TABLE IF NOT EXISTS wordgame(guild_id INTEGER PRIMARY KEY, channel_id INTEGER, last_word TEXT, last_user INTEGER, streak INTEGER DEFAULT 0);
         INSERT OR IGNORE INTO owner_settings(id) VALUES (1);""")
-        for t, col, ty in (("users","pro_tag","TEXT"),("users","xp2","INTEGER DEFAULT 0"),("tickets","claimed_by","INTEGER"),("afk","mentions","INTEGER DEFAULT 0"),("tickets","subject","TEXT"),("tickets","category","TEXT"),("tickets","created_at","TEXT"),("tickets","number","INTEGER"),("tickets","description","TEXT")):
+        for t, col, ty in (("users","pro_tag","TEXT"),("users","xp2","INTEGER DEFAULT 0"),("tickets","claimed_by","INTEGER"),("afk","mentions","INTEGER DEFAULT 0"),("tickets","subject","TEXT"),("tickets","category","TEXT"),("tickets","created_at","TEXT"),("tickets","number","INTEGER"),("tickets","description","TEXT"),("role_menus","channel_id","INTEGER"),("role_menus","message_id","INTEGER"),("role_menus","title","TEXT")):
             try: c.execute("ALTER TABLE " + t + " ADD COLUMN " + col + " " + ty)
             except sqlite3.OperationalError: pass
         self.conn.commit()
@@ -439,7 +456,7 @@ async def guild_log_send(g, t):
             try: await rp_ch(ch, t); return True
             except Exception: pass
     return False
-VERSION_TAGLINE = {"5.6": "AI resim • Free 7/gün • Pro sınırsız • gelişmiş çekiliş yönetimi", "5.5": "Yardım menüsü düzeltmesi • avatarlı kartlar • 6 yeni komut", "5.4": "Premium kartlar • V2 ticket • yeni yardım menüsü", "5.3": "Açıklayıcı hatalar • TDK kelime oyunu", "5.2": "Duyuru sistemi • V2 yardım"}
+VERSION_TAGLINE = {"5.7": "Free AI API • gelişmiş butonrol sistemi • kalıcı rol panelleri", "5.6": "AI resim • Free 7/gün • Pro sınırsız • gelişmiş çekiliş yönetimi", "5.5": "Yardım menüsü düzeltmesi • avatarlı kartlar • 6 yeni komut", "5.4": "Premium kartlar • V2 ticket • yeni yardım menüsü", "5.3": "Açıklayıcı hatalar • TDK kelime oyunu", "5.2": "Duyuru sistemi • V2 yardım"}
 def update_text(ver, prev=None):
     L = [e("party") + " **KATRE v" + ver + " YAYINDA!**", DIV, e("spark") + " " + VERSION_TAGLINE.get(ver, "Yeni sürüm yayında")]
     ns = CHANGELOG.get(ver, [])
@@ -539,48 +556,85 @@ def ai_image_remaining(user_id):
     used = int(row["uses"]) if row else 0
     return str(max(0, AI_FREE_DAILY_LIMIT - used))
 
+async def _http_image(url, headers=None, payload=None, timeout_total=180):
+    timeout = aiohttp.ClientTimeout(total=timeout_total)
+    async with aiohttp.ClientSession(timeout=timeout) as ses:
+        async with ses.post(url, json=payload, headers=headers or {}) as r:
+            raw = await r.read()
+            if r.status >= 400:
+                try:
+                    err = json.loads(raw.decode("utf-8", errors="replace"))
+                    msg = err.get("error", {}).get("message") or err.get("message") or raw.decode("utf-8", errors="replace")
+                except Exception:
+                    msg = raw.decode("utf-8", errors="replace")
+                raise RuntimeError("HTTP " + str(r.status) + ": " + str(msg)[:500])
+            return raw, r.headers.get("Content-Type", "")
+
+async def huggingface_generate_image(prompt):
+    if not HF_TOKEN:
+        raise RuntimeError("HF_TOKEN ayarlanmamış.")
+    if InferenceClient is None:
+        raise RuntimeError("huggingface_hub kurulu değil. `pip install -U huggingface_hub>=1.1.2` çalıştır.")
+    try:
+        client = InferenceClient(api_key=HF_TOKEN, provider="auto")
+        image = await asyncio.to_thread(
+            client.text_to_image,
+            prompt[:4000],
+            model=HF_IMAGE_MODEL,
+            width=1024,
+            height=1024,
+        )
+        buf = io.BytesIO()
+        image.save(buf, format="PNG")
+        return buf.getvalue()
+    except Exception as ex:
+        raise RuntimeError("Hugging Face: " + str(ex)[:500])
+
 async def openai_generate_image(prompt):
     if not OPENAI_API_KEY:
         raise RuntimeError("OPENAI_API_KEY ayarlanmamış.")
-    payload = {
-        "model": OPENAI_IMAGE_MODEL,
-        "prompt": prompt[:4000],
-        "size": "1024x1024",
-        "n": 1,
-    }
-    headers = {
-        "Authorization": "Bearer " + OPENAI_API_KEY,
-        "Content-Type": "application/json",
-    }
-    timeout = aiohttp.ClientTimeout(total=180)
-    async with aiohttp.ClientSession(timeout=timeout) as ses:
-        async with ses.post("https://api.openai.com/v1/images/generations", json=payload, headers=headers) as r:
-            raw = await r.text()
-            if r.status >= 400:
-                try:
-                    err = json.loads(raw)
-                    msg = err.get("error", {}).get("message") or raw
-                except Exception:
-                    msg = raw
-                raise RuntimeError("OpenAI API " + str(r.status) + ": " + str(msg)[:500])
-            data = json.loads(raw)
+    payload = {"model": OPENAI_IMAGE_MODEL, "prompt": prompt[:4000], "size": "1024x1024", "n": 1}
+    headers = {"Authorization": "Bearer " + OPENAI_API_KEY, "Content-Type": "application/json"}
+    raw, _ = await _http_image("https://api.openai.com/v1/images/generations", headers=headers, payload=payload)
+    try:
+        data = json.loads(raw)
+    except Exception as ex:
+        raise RuntimeError("OpenAI yanıtı okunamadı: " + str(ex))
     items = data.get("data") or []
-    if not items:
-        raise RuntimeError("OpenAI görsel yanıtı boş döndü.")
+    if not items: raise RuntimeError("OpenAI görsel yanıtı boş döndü.")
     item = items[0]
     if item.get("b64_json"):
-        try:
-            return base64.b64decode(item["b64_json"])
-        except Exception as ex:
-            raise RuntimeError("Görsel verisi çözülemedi: " + str(ex))
+        try: return base64.b64decode(item["b64_json"])
+        except Exception as ex: raise RuntimeError("Görsel verisi çözülemedi: " + str(ex))
     url = item.get("url")
     if url:
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=120)) as ses:
+        timeout = aiohttp.ClientTimeout(total=120)
+        async with aiohttp.ClientSession(timeout=timeout) as ses:
             async with ses.get(url) as r:
-                if r.status != 200:
-                    raise RuntimeError("Üretilen görsel indirilemedi (HTTP " + str(r.status) + ").")
+                if r.status != 200: raise RuntimeError("Üretilen görsel indirilemedi (HTTP " + str(r.status) + ").")
                 return await r.read()
     raise RuntimeError("OpenAI yanıtında b64_json veya url bulunamadı.")
+
+async def generate_ai_image(prompt, pro_user=False):
+    providers = []
+    if AI_PROVIDER == "huggingface": providers = ["huggingface"]
+    elif AI_PROVIDER == "openai": providers = ["openai"]
+    elif AI_PROVIDER == "auto":
+        if pro_user and OPENAI_API_KEY: providers.append("openai")
+        if HF_TOKEN: providers.append("huggingface")
+        if OPENAI_API_KEY and "openai" not in providers: providers.append("openai")
+    else:
+        providers = [x for x in ("huggingface", "openai") if x == AI_PROVIDER]
+    if not providers:
+        raise RuntimeError("AI sağlayıcısı ayarlanmadı. `HF_TOKEN` veya `OPENAI_API_KEY` ekle.")
+    errors = []
+    for provider in providers:
+        try:
+            if provider == "huggingface": return await huggingface_generate_image(prompt), "Hugging Face • " + HF_IMAGE_MODEL
+            return await openai_generate_image(prompt), "OpenAI • " + OPENAI_IMAGE_MODEL
+        except Exception as ex:
+            errors.append(provider.upper() + ": " + str(ex)[:300])
+    raise RuntimeError(" / ".join(errors))
 
 def is_owner():
     async def p(ctx):
@@ -606,13 +660,13 @@ def kategori(a):
     return d
 
 CATS = {"genel":("genel","Genel & Sistem"),"mod":("mod","Moderasyon & Koruma"),"sys":("sys","Başvuru & Otomasyon"),"eco":("eco","Ekonomi"),"fun":("fun","Eğlence"),"give":("give","Çekiliş"),"pro":("pro","Pro"),"owner":("owner","Owner")}
-CAT_DESC = {"genel":"Rank, profil, avatar, snipe, AFK, oda, AI resim","mod":"Ban, kick, unban, mute, uyarı, oto-ceza, koruma","sys":"Başvuru, ticket, temp voice, kelime oyunu, log","eco":"Coin, günlük, çalışma, balık, maden, market","fun":"Quiz, slot, aşk, anket ve oyunlar","give":"Butonlu çekiliş, reroll, sonuç paneli","pro":"Pro oda, rol, bonus, banner, şans","owner":"Owner + Half Owner paneli, duyuru"}
+CAT_DESC = {"genel":"Rank, profil, avatar, snipe, AFK, oda, AI resim","mod":"Ban, kick, unban, mute, uyarı, oto-ceza, koruma, butonrol","sys":"Başvuru, ticket, temp voice, kelime oyunu, log","eco":"Coin, günlük, çalışma, balık, maden, market","fun":"Quiz, slot, aşk, anket ve oyunlar","give":"Butonlu çekiliş, reroll, sonuç paneli","pro":"Pro oda, rol, bonus, banner, şans","owner":"Owner + Half Owner paneli, duyuru"}
 def cat_count(b, k): return len([c for c in b.commands if getattr(c, "kategori", None) == k])
 HELP_COLORS = {"genel":0x5865F2,"mod":0xE67E22,"sys":0x1ABC9C,"eco":0xF1C40F,"fun":0x9B59B6,"give":0xEB459E,"pro":0x00D9FF,"owner":0xFEE75C}
 HELP_TIPS = ["`k!günlük` ile her gün ücretsiz coin topla.", "`k!rank` ile seviyeni ve sıralamanı gör.", "`k!destek` paneliyle sunucunda ticket sistemi kurabilirsin.",
     "`k!afk <sebep>` yazınca seni etiketleyenlere sebebi gösteririm.", "`k!oylama soru | seçenek1 | seçenek2` ile hızlı anket aç.", "`k!hesapla 12*(3+4)` ile hızlı hesap yap.",
     "`k!komutbilgi <komut>` ile bir komutun kullanımını öğren.", "`k!çekiliş` ile butonlu çekiliş başlatabilirsin.", "`k!kullanıcıbilgi @üye` ile üye hakkında detaylı bilgi al.",
-    "`k!sarıl @üye` ile birine sıcak bir sarılma gönder.", "`k!resim <prompt>` ile AI görsel oluştur. Free günlük 7, Pro sınırsız."]
+    "`k!sarıl @üye` ile birine sıcak bir sarılma gönder.", "`k!resim <prompt>` ile AI görsel oluştur. Free günlük 7, Pro sınırsız. `k!butonrol` ile rol butonları oluştur."]
 def help_content(bot):
     L = ["## " + e("logo") + " " + bot.user.name.upper() + " • YARDIM MERKEZİ", DIV,
          "Selam! Ben **" + bot.user.name + "** " + e("spark") + " — moderasyon, ekonomi, eğlence, ticket ve çok daha fazlası tek botta.", "",
@@ -884,14 +938,34 @@ class PollPanel(Panel):
 class RoleMenuPanel(Panel):
     def __init__(self, mid, roles, text):
         super().__init__(text, timeout=None)
-        for i, (rid, nm) in enumerate(roles):
+        self.mid = str(mid)
+        for i, (rid, nm) in enumerate(roles[:25]):
             async def cb(it, r_id=rid):
+                await it.response.defer(ephemeral=True)
                 r = it.guild.get_role(r_id)
-                if not r: return await sendv_eph(it, ER("ROL BULUNAMADI", "Bu rol silinmiş olabilir. Yetkililere haber ver."))
-                if r in it.user.roles: await it.user.remove_roles(r); m = e("cross") + " " + r.name
-                else: await it.user.add_roles(r); m = e("check") + " " + r.name
-                await sendv_eph(it, head("shield", "ROL GÜNCELLENDİ") + "\n\nSeçimin kaydedildi: " + m)
-            self.btn(nm[:78], cb, style=discord.ButtonStyle.secondary, emoji="🎭", cid="kr_" + mid + "_" + str(rid), row=i // 5)
+                if not r:
+                    return await it.followup.send(ER("ROL BULUNAMADI", "Bu rol silinmiş; yönetici `k!butonrollist` ile menüyü temizleyebilir."), ephemeral=True)
+                me = it.guild.me
+                if not me or not me.guild_permissions.manage_roles:
+                    return await it.followup.send(ER("BOT YETKİSİ EKSİK", "Botun **Rolleri Yönet** yetkisi yok."), ephemeral=True)
+                if r.is_default() or r.managed:
+                    return await it.followup.send(ER("ROL UYGUN DEĞİL", "@everyone veya Discord tarafından yönetilen bir rol butonrol olarak kullanılamaz."), ephemeral=True)
+                if r >= me.top_role:
+                    return await it.followup.send(ER("ROL HİYERARŞİSİ", "Bu rol botun en yüksek rolüyle aynı veya daha üstte. Bot rolünü yukarı taşı."), ephemeral=True)
+                try:
+                    if r in it.user.roles:
+                        await it.user.remove_roles(r, reason="Katre butonrol")
+                        msg = e("cross") + " **" + r.name + "** rolü kaldırıldı."
+                    else:
+                        await it.user.add_roles(r, reason="Katre butonrol")
+                        msg = e("check") + " **" + r.name + "** rolü verildi."
+                    await it.followup.send(head("shield", "ROL GÜNCELLENDİ") + "\n\n" + msg, ephemeral=True)
+                except discord.Forbidden:
+                    await it.followup.send(ER("ROL VERİLEMEDİ", "Discord botun bu role erişmesine izin vermedi. Bot rolünü hedef rolün üstüne taşı."), ephemeral=True)
+                except Exception as ex:
+                    await it.followup.send(ER("ROL İŞLEMİ HATASI", str(ex)[:500]), ephemeral=True)
+            style = discord.ButtonStyle.success if i < 5 else discord.ButtonStyle.secondary
+            self.btn(nm[:80], cb, style=style, emoji="🎭", cid="kr_" + self.mid + "_" + str(rid), row=i // 5)
 
 # ═══════════════════════════════════════════════════════════════════
 # 🎫 TİCKET SİSTEMİ v5.4 (V2 kart panel • talep türleri • transkript)
@@ -1973,13 +2047,62 @@ async def hoşgeldin(ctx, ch: discord.TextChannel = None):
         db.q("UPDATE servers SET welcome_ch=NULL WHERE guild_id=?", (ctx.guild.id,)); return await rp(ctx, OK("HOŞ GELDİN MESAJI KAPANDI", "Yeni üyeler için karşılama mesajı artık gönderilmeyecek." + tip("Açmak için `k!hoşgeldin #kanal` yaz.")))
     db.q("UPDATE servers SET welcome_ch=? WHERE guild_id=?", (ch.id, ctx.guild.id)); await rp(ctx, OK("HOŞ GELDİN KANALI AYARLANDI", "Yeni üyeler " + ch.mention + " kanalında karşılanacak. 👋"))
 @kategori("mod")
-@bot.command(name="butonrol", aliases=["rolmenü"], help="<@rol...>")
+@bot.command(name="butonrol", aliases=["rolmenü"], help="<@rol...> [| başlık]")
 @commands.has_permissions(administrator=True)
-async def butonrol(ctx, rs: commands.Greedy[discord.Role], *, a="Rolünü seç!"):
-    if not rs or len(rs) > 25: return await rp(ctx, ER("GEÇERSİZ ROL SAYISI", "Menü için **1-25 arası** rol etiketlemelisin.\nÖrnek: `k!butonrol @Rol1 @Rol2 Rolünü seç!`"))
+@commands.bot_has_permissions(manage_roles=True)
+async def butonrol(ctx, *, raw):
+    parts = [x.strip() for x in raw.split("|", 1)]
+    role_text = parts[0]
+    title = parts[1].strip() if len(parts) > 1 else "Rolünü seç!"
+    converter = commands.RoleConverter()
+    roles = []
+    for token in role_text.split():
+        try:
+            role = await converter.convert(ctx, token)
+        except commands.BadArgument:
+            continue
+        if role.id not in [r.id for r in roles]: roles.append(role)
+    if not roles or len(roles) > 25:
+        return await rp(ctx, ER("GEÇERSİZ ROL SAYISI", "**1-25** arası geçerli rol eklemelisin. Örnek: `k!butonrol @Oyuncu @Renkli | Sunucunun rollerini seç!`"))
+    me = ctx.guild.me
+    bad = [r for r in roles if r.is_default() or r.managed or r >= me.top_role]
+    if bad:
+        return await rp(ctx, ER("ROL HİYERARŞİSİ", "Botun veremeyeceği roller var: " + ", ".join(r.name for r in bad[:10]) + ". Bot rolünü bu rollerin üstüne taşı."))
     mid = str(random.randint(10**11, 10**12 - 1))
-    db.q("INSERT OR REPLACE INTO role_menus(menu_id,guild_id,role_ids) VALUES(?,?,?)", (mid, ctx.guild.id, json.dumps([r.id for r in rs])))
-    t = head("shield", "ROL MENÜSÜ") + "\n\n" + a + "\nİstediğin rolün butonuna bas; tekrar basarsan rol geri alınır."; v = RoleMenuPanel(mid, [(r.id, r.name) for r in rs], t); bot.add_view(v); await rp(ctx, t, v)
+    t = head("shield", "ROL MENÜSÜ") + "\n\n" + title[:500] + "\n\n" + e("dot") + " Bir role basarak al/kaldır."
+    v = RoleMenuPanel(mid, [(r.id, r.name) for r in roles], t)
+    msg = await rp(ctx, t, v)
+    if not msg: return
+    db.q("INSERT OR REPLACE INTO role_menus(menu_id,guild_id,channel_id,message_id,title,role_ids) VALUES(?,?,?,?,?,?)", (mid, ctx.guild.id, ctx.channel.id, msg.id, title[:500], json.dumps([r.id for r in roles])))
+    bot.add_view(v)
+    await rp(ctx, OK("BUTONROL OLUŞTURULDU", "Menü ID: `" + mid + "`\nRoller: **" + str(len(roles)) + "**\nSilmek için: `k!butonrolsil " + mid + "`"))
+
+@kategori("mod")
+@bot.command(name="butonrollist", aliases=["rolmenüler"], help="Sunucudaki butonrol menülerini listeler")
+@commands.has_permissions(administrator=True)
+async def butonrollist(ctx):
+    rows = db.all("SELECT * FROM role_menus WHERE guild_id=?", (ctx.guild.id,))
+    if not rows: return await rp(ctx, WN("BUTONROL YOK", "Bu sunucuda kayıtlı butonrol menüsü bulunmuyor."))
+    out=[]
+    for r in rows:
+        out.append(e("arrow") + " `" + str(r["menu_id"]) + "` • **" + (r["title"] or "Rol menüsü")[:60] + "** • " + str(len(json.loads(r["role_ids"] or "[]"))) + " rol")
+    await rp(ctx, head("shield", "BUTONROL MENÜLERİ") + "\n\n" + "\n".join(out) + "\n\n`k!butonrolsil <id>` ile kaldırabilirsin.")
+
+@kategori("mod")
+@bot.command(name="butonrolsil", aliases=["rolmenüsil"], help="<menü-id>")
+@commands.has_permissions(administrator=True)
+async def butonrolsil(ctx, mid: str):
+    row = db.one("SELECT * FROM role_menus WHERE menu_id=? AND guild_id=?", (mid, ctx.guild.id))
+    if not row: return await rp(ctx, ER("MENÜ BULUNAMADI", "Bu sunucuda böyle bir butonrol menüsü yok."))
+    db.q("DELETE FROM role_menus WHERE menu_id=? AND guild_id=?", (mid, ctx.guild.id))
+    ch = ctx.guild.get_channel(row["channel_id"]) if row["channel_id"] else None
+    if ch and row["message_id"]:
+        try:
+            msg = await ch.fetch_message(row["message_id"])
+            await msg.edit(view=None)
+        except Exception: pass
+    await rp(ctx, OK("BUTONROL SİLİNDİ", "`" + mid + "` menüsü kaldırıldı ve kayıt silindi."))
+
 @kategori("mod")
 @bot.command(name="koruma", help="<mod> <aç/kapat>")
 @commands.has_permissions(administrator=True)
@@ -2506,8 +2629,8 @@ async def resim(ctx, *, prompt: str):
     if len(prompt) > 4000:
         return await rp(ctx, ER("PROMPT ÇOK UZUN", "Prompt en fazla **4000 karakter** olabilir."))
 
-    if not OPENAI_API_KEY:
-        return await rp(ctx, ER("AI AYARLANMADI", "Sunucu yöneticisi `OPENAI_API_KEY` ortam değişkenini ayarlamalı."))
+    if not HF_TOKEN and not OPENAI_API_KEY:
+        return await rp(ctx, ER("AI AYARLANMADI", "Sunucu yöneticisi `HF_TOKEN` veya `OPENAI_API_KEY` eklemeli."))
 
     ok, count, pro_user = await ai_image_reserve(ctx.author.id)
     if not ok:
@@ -2517,7 +2640,7 @@ async def resim(ctx, *, prompt: str):
     await rp(ctx, head("spark", "AI RESİM OLUŞTURULUYOR") + "\n\nPrompt: **" + prompt[:800] + "**\n" + e("dot") + " Plan: **" + status + "**\n\nBiraz bekle, görsel hazırlanıyor... 🎨")
 
     try:
-        image_bytes = await openai_generate_image(prompt)
+        image_bytes, provider_name = await generate_ai_image(prompt, pro_user=pro_user)
         if not image_bytes:
             raise RuntimeError("Boş görsel verisi döndü.")
         file = discord.File(io.BytesIO(image_bytes), filename="katre-ai.png")
@@ -2526,9 +2649,11 @@ async def resim(ctx, *, prompt: str):
         await ai_image_refund(ctx.author.id)
         msg = str(ex)
         if "401" in msg or "Incorrect API key" in msg:
-            msg = "OpenAI API anahtarı geçersiz veya yetkisiz."
+            msg = "AI API anahtarı geçersiz veya yetkisiz."
         elif "429" in msg:
-            msg = "OpenAI API kullanım/billing limiti nedeniyle istek reddedildi."
+            msg = "AI sağlayıcısı kullanım/rate limit nedeniyle isteği reddetti."
+        elif "403" in msg:
+            msg = "AI sağlayıcısı bu model için erişimi reddetti; token/model ayarlarını kontrol et."
         await rp(ctx, ER("AI RESİM OLUŞTURULAMADI", msg[:700] + "\n\nKullanım hakkın başarısız üretim nedeniyle geri verildi."))
 @kategori("pro")
 @bot.command(name="pro", help="Durum + ayrıcalıklar")
