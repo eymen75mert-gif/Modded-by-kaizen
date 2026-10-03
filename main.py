@@ -1,5 +1,5 @@
 # ═══════════════════════════════════════════════════════════════════
-#  💧 KATRE BOT v5.8 — BÖLÜM 1/2 • GELİŞMİŞ TİCKET • SELECT PANEL • PREMIUM KART • V2 YARDIM
+#  💧 KATRE BOT v5.9 — BÖLÜM 1/2 • GELİŞMİŞ TİCKET • SELECT PANEL • PREMIUM KART • V2 YARDIM
 #  ENV: BOT_TOKEN, OWNER_ID, SUPPORT_URL, BACKUP_CHANNEL_ID, OPENAI_API_KEY, OPENAI_IMAGE_MODEL, HF_TOKEN, HF_IMAGE_MODEL, AI_PROVIDER
 #  requirements.txt: discord.py>=2.6.0, aiohttp>=3.9.0, huggingface_hub>=1.1.2
 # ═══════════════════════════════════════════════════════════════════
@@ -50,8 +50,15 @@ BACKUP_CH = int(os.getenv("BACKUP_CHANNEL_ID", "0"))
 MARKER = "#KATRE_YEDEK"
 DIV = "──────────────────────────────"
 PAGE_SIZE = 15
-BOT_VERSION = "5.8"
+BOT_VERSION = "5.9"
 CHANGELOG = {
+    "5.9": [
+        "🐛 Ticket panelindeki Components V2 `view parameter must be View not Container` hatası düzeltildi",
+        "🎫 Ticket paneli artık LayoutView içinde güvenli şekilde gönderiliyor",
+        "👑 Owner için `ownerbilgi`, `sunucusay` ve `guildbilgi` komutları eklendi",
+        "🛡️ Half Owner için `halfownerbilgi`, `protopluver` ve `protoplual` komutları eklendi",
+        "🔐 Half Owner/Owner komutlarında hedef rol ve yetki kontrolleri sıkılaştırıldı",
+    ],
     "5.8": [
         "🧹 `k!resim` kaldırıldı",
         "🎫 Ticket paneli select menüye geçti; formda öncelik seçimi eklendi",
@@ -976,7 +983,7 @@ class RoleMenuPanel(Panel):
             self.btn(nm[:80], cb, style=style, emoji="🎭", cid="kr_" + self.mid + "_" + str(rid), row=i // 5)
 
 # ═══════════════════════════════════════════════════════════════════
-# 🎫 TİCKET SİSTEMİ v5.8 (select panel • öncelik • üstlenen yetkili kilidi)
+# 🎫 TİCKET SİSTEMİ v5.9 (select panel • öncelik • üstlenen yetkili kilidi)
 # ═══════════════════════════════════════════════════════════════════
 TICKET_CATS = {"destek": ("🛠️", "Genel Destek", 0x5865F2), "sikayet": ("🚨", "Şikayet", 0xED4245), "oneri": ("💡", "Öneri", 0xFEE75C), "ortaklik": ("🤝", "Ortaklık", 0x57F287)}
 TICKET_PRIORITIES = {"dusuk": ("🟢", "Düşük"), "normal": ("🔵", "Normal"), "yuksek": ("🟠", "Yüksek"), "acil": ("🔴", "Acil")}
@@ -1104,11 +1111,24 @@ def ticket_view_v2(t=None, closed=False):
     return card_view(text, rows, accent=col)
 def ticket_open_v2(guild=None):
     text = (head("ticket", "DESTEK MERKEZİ") + "\n\nAşağıdaki menüden destek türünü seç. Form açılacak; konu, açıklama ve **öncelik** bilgilerini doldurduğunda sana özel ticket açılacak.\n\n" + e("info") + " Aynı anda yalnızca **1 açık** ticket açabilirsin.")
-    con = Container() if V2_OK and Container else None
-    if con is not None:
+    if V2_OK and Container and LayoutView:
+        # Components V2'de Container doğrudan `view=` parametresine verilemez.
+        # Container bir LayoutView içine eklenmelidir.
+        try:
+            lv = LayoutView(timeout=None)
+        except TypeError:
+            lv = LayoutView()
+            con = Container()
+            con.add_item(TextDisplay(text))
+            _sep(con, False); con.add_item(_row(TicketCategorySelect()))
+            lv.add_item(con)
+            return lv
+        con = Container()
         con.add_item(TextDisplay(text))
-        _sep(con, False); con.add_item(_row(TicketCategorySelect()))
-        return con
+        _sep(con, False)
+        con.add_item(_row(TicketCategorySelect()))
+        lv.add_item(con)
+        return lv
     return TicketOpenPanel(text)
 class TicketModal(Modal, title="Destek Talebi"):
     konu = TextInput(label="Konu", max_length=100, placeholder="Sorununu kısaca yaz")
@@ -2779,6 +2799,55 @@ async def duyuru(ctx, *, m):
         await asyncio.sleep(0.4)
     await rp(ctx, OK("DUYURU GÖNDERİLDİ", "**" + str(ok) + "** sunucu sahibine ulaştı.\n**" + str(fail) + "** kişide DM kapalıydı."))
 @kategori("owner")
+@bot.command(name="halfownerbilgi", aliases=["hob", "coownerinfo"], help="[<@üye>] — Half Owner bilgisi")
+@is_half()
+async def halfownerbilgi(ctx, u: discord.Member = None):
+    u = u or ctx.author
+    row = db.one("SELECT * FROM half_owners WHERE user_id=?", (u.id,))
+    if not row:
+        return await rp(ctx, WN("HALF OWNER DEĞİL", u.mention + " şu anda Half Owner değil."))
+    added = "<@" + str(row["added_by"]) + ">" if row.get("added_by") else "—"
+    since = str(row.get("since") or "—")[:19].replace("T", " ")
+    await rp(ctx, head("owner", "HALF OWNER BİLGİSİ") + "\n\n" + KV([
+        (e("shield") + "Üye", u.mention),
+        (e("alarm") + "Atanma", since),
+        (e("crown") + "Atayan", added),
+        (e("diamond") + "Pro yönetimi", "Açık"),
+        (e("log") + "Pro logları", "Açık"),
+        (e("warn") + "Bakım yönetimi", "Kapalı"),
+        (e("gear") + "Owner komutları", "Kapalı")
+    ]))
+
+@kategori("owner")
+@bot.command(name="protopluver", help="<@rol> [gün] — Role toplu Pro")
+@is_half()
+async def protopluver(ctx, role: discord.Role, g: int = 30):
+    if g < 1 or g > 3650:
+        return await rp(ctx, ER("GEÇERSİZ SÜRE", "Pro süresi **1-3650 gün** arasında olmalı."))
+    me = ctx.guild.me
+    if role.is_default() or role.managed or (me and role >= me.top_role):
+        return await rp(ctx, ER("ROL HİYERARŞİSİ", "Bu rol botun yönetebileceği seviyede değil."))
+    members = [m for m in role.members if not m.bot and m.id != OWNER_ID and not is_half_owner(m.id)]
+    if not members:
+        return await rp(ctx, WN("ÜYE YOK", "Bu rolde Pro verilebilecek üye bulunamadı."))
+    ex = (datetime.datetime.now() + datetime.timedelta(days=g)).isoformat()
+    for m in members:
+        ensure_user(m.id, str(m)); db.q("UPDATE users SET pro=1, pro_expiry=? WHERE user_id=?", (ex, m.id)); pro_log(m.id, "TOPLU_VERİLDİ", g, ctx.author.id)
+    await rp(ctx, OK("TOPLU PRO VERİLDİ", role.mention + " rolündeki **" + str(len(members)) + "** üyeye **" + str(g) + " gün** Pro verildi."))
+
+@kategori("owner")
+@bot.command(name="protoplual", help="<@rol> — Role toplu Pro kaldır")
+@is_half()
+async def protoplual(ctx, role: discord.Role):
+    members = [m for m in role.members if not m.bot and m.id != OWNER_ID and not is_half_owner(m.id)]
+    changed = 0
+    for m in members:
+        row = db.one("SELECT pro FROM users WHERE user_id=?", (m.id,))
+        if row and row["pro"]:
+            db.q("UPDATE users SET pro=0, pro_expiry=NULL WHERE user_id=?", (m.id,)); pro_log(m.id, "TOPLU_ALINDI", 0, ctx.author.id); changed += 1
+    await rp(ctx, WN("TOPLU PRO ALINDI", role.mention + " rolündeki **" + str(changed) + "** üyeden Pro kaldırıldı."))
+
+@kategori("owner")
 @bot.command(name="halfowner", aliases=["coowner"], help="<ayarla/kaldır/bilgi/liste>")
 async def halfowner(ctx, i: str = "bilgi", u: discord.Member = None):
     i = i.lower()
@@ -2796,6 +2865,54 @@ async def halfowner(ctx, i: str = "bilgi", u: discord.Member = None):
     else:
         me = db.one("SELECT * FROM half_owners WHERE user_id=?", (ctx.author.id,))
         await rp(ctx, head("owner", "HALF OWNER") + "\n\nYetkileri: `prover` `proal` `prologlar` `duyuru`\nDiğer owner komutları kapalıdır.\n\n" + (e("check") + " Sen bir Half Owner'sın." if me else e("info") + " Sen Half Owner değilsin."))
+@kategori("owner")
+@bot.command(name="ownerbilgi", aliases=["ownerinfo", "botdurum"], help="Owner sistem bilgileri")
+@is_half()
+async def ownerbilgi(ctx):
+    up = str(datetime.datetime.now() - bot.start_time).split(".")[0] if hasattr(bot, "start_time") else "—"
+    db_size = "—"
+    try:
+        db_size = str(round(os.path.getsize(DB_PATH) / 1024 / 1024, 2)) + " MB"
+    except Exception:
+        pass
+    await rp(ctx, head("owner", "OWNER SİSTEM BİLGİSİ") + "\n\n" + KV([
+        (e("robot") + "Bot", bot.user.name if bot.user else "—"),
+        (e("tag") + "Sürüm", "v" + BOT_VERSION),
+        (e("genel") + "Sunucu", str(len(bot.guilds))),
+        (e("dot") + "Kullanıcı", str(sum(g.member_count or 0 for g in bot.guilds))),
+        (e("gear") + "Komut", str(len(bot.commands))),
+        (e("bolt") + "Ping", str(round(bot.latency * 1000)) + " ms"),
+        (e("alarm") + "Uptime", up),
+        (e("shield") + "Half Owner", str(len(db.all("SELECT 1 FROM half_owners")))),
+        (e("database") + "DB", db_size),
+        (e("warn") + "Bakım", "AÇIK" if is_maintenance() else "KAPALI")
+    ]) + tip("Owner ve Half Owner bu paneli görebilir; bakım açma/kapama yalnızca Owner'dadır."))
+
+@kategori("owner")
+@bot.command(name="sunucusay", aliases=["guildcount"], help="Botun bağlı olduğu sunucu sayısı")
+@is_half()
+async def sunucusay(ctx):
+    total_members = sum(g.member_count or 0 for g in bot.guilds)
+    await rp(ctx, OK("SUNUCU SAYISI", "Bot şu anda **" + str(len(bot.guilds)) + "** sunucuda.\nToplam yaklaşık üye sayısı: **" + str(total_members) + "**."))
+
+@kategori("owner")
+@bot.command(name="guildbilgi", aliases=["sunucubul"], help="<sunucu_id> — Sunucu bilgisi")
+@is_half()
+async def guildbilgi(ctx, guild_id: int):
+    g = bot.get_guild(guild_id)
+    if not g:
+        return await rp(ctx, ER("SUNUCU BULUNAMADI", "Bot bu ID ile bir sunucuda bulunmuyor."))
+    owner = "<@" + str(g.owner_id) + ">" if g.owner_id else "—"
+    await rp(ctx, head("owner", "SUNUCU BİLGİSİ") + "\n\n" + KV([
+        (e("crown") + "Sunucu", g.name),
+        (e("tag") + "ID", str(g.id)),
+        (e("dot") + "Üye", str(g.member_count or 0)),
+        (e("genel") + "Kanal", str(len(g.channels))),
+        (e("shield") + "Rol", str(len(g.roles))),
+        (e("crown") + "Sahip", owner),
+        (e("spark") + "Boost", "Seviye " + str(g.premium_tier) + " • " + str(g.premium_subscription_count or 0))
+    ]))
+
 @kategori("owner")
 @bot.command(name="sahip", aliases=["owner","panel"], help="Panel")
 @is_owner()
