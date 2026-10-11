@@ -16,9 +16,9 @@ from datetime import datetime, timedelta
 # ─────────────────────────────────────────────
 CONFIG_PATH = "config.json"
 DEFAULT_CONFIG = {
-    "token": "TOKEN_BURAYA",
+    "token": "MTU1MzczMjIzNjUzNTE0MDM3Mg.GvIuiE.C2BHmrqCMR1l-0K9xJ2qOl6h-0Ri_KqRoRTDbg",
     "prefix": "m!",
-    "owner_ids": []
+    "owner_ids": [1157669162789916752]
 }
 
 def load_config():
