@@ -50,8 +50,9 @@ BACKUP_CH = int(os.getenv("BACKUP_CHANNEL_ID", "0"))
 MARKER = "#KATRE_YEDEK"
 DIV = "──────────────────────────────"
 PAGE_SIZE = 15
-BOT_VERSION = "6.5.2"
+BOT_VERSION = "6.5.3"
 CHANGELOG = {
+    "6.5.3": ["💎 KTMR Projects için bot owner paylaşım kanalı eklendi: dosya/link/kod içerikleri Components V2 kartlarına dönüştürülür.", "🔘 Kod DM teslimi, indirme/link butonları ve kalıcı paylaşım butonları eklendi.", "🛍️ Mağaza komutları dinamik yardım menüsünde görünür; manuel ödeme akışı korunur."],
     "6.5": [
         "📣 Reklam / zorunlu sunucu sistemi eklendi: Owner panelinden tamamen butonlarla açılıp kapatılabilir.",
         "🔐 Belirlenen sunucuya katılmayan kullanıcılar komutları kullanamaz; otomatik uyarı ve davet butonu görür.",
@@ -561,7 +562,7 @@ def _greeting_view(text, member, accent):
     except TypeError: lv = LayoutView()
     lv.add_item(con); return lv
 
-VERSION_TAGLINE = {"6.3": "Components V2 karşılama • genişletilmiş full log • ayarlanabilir mesaj şablonları", "6.0": "Çalışan ticket butonları • ticket'a git • kalıcı select panel • öncelik akışı", "5.8": "Gelişmiş ticket • select panel • öncelik • yetkili kilidi", "5.7": "Free AI API • gelişmiş butonrol sistemi • kalıcı rol panelleri", "5.6": "AI resim • Free 7/gün • Pro sınırsız • gelişmiş çekiliş yönetimi", "5.5": "Yardım menüsü düzeltmesi • avatarlı kartlar • 6 yeni komut", "5.4": "Premium kartlar • V2 ticket • yeni yardım menüsü", "5.3": "Açıklayıcı hatalar • TDK kelime oyunu", "5.2": "Duyuru sistemi • V2 yardım"}
+VERSION_TAGLINE = {"6.5.3": "KTMR Projects V2 paylaşım sistemi • kalıcı butonlar • mağaza yardım entegrasyonu", "6.3": "Components V2 karşılama • genişletilmiş full log • ayarlanabilir mesaj şablonları", "6.0": "Çalışan ticket butonları • ticket'a git • kalıcı select panel • öncelik akışı", "5.8": "Gelişmiş ticket • select panel • öncelik • yetkili kilidi", "5.7": "Free AI API • gelişmiş butonrol sistemi • kalıcı rol panelleri", "5.6": "AI resim • Free 7/gün • Pro sınırsız • gelişmiş çekiliş yönetimi", "5.5": "Yardım menüsü düzeltmesi • avatarlı kartlar • 6 yeni komut", "5.4": "Premium kartlar • V2 ticket • yeni yardım menüsü", "5.3": "Açıklayıcı hatalar • TDK kelime oyunu", "5.2": "Duyuru sistemi • V2 yardım"}
 def update_text(ver, prev=None):
     L = [e("party") + " **KATRE v" + ver + " YAYINDA!**", DIV, e("spark") + " " + VERSION_TAGLINE.get(ver, "Yeni sürüm yayında")]
     ns = CHANGELOG.get(ver, [])
@@ -1446,7 +1447,7 @@ class KatreBot(commands.Bot):
         return list(prefixes)
     async def setup_hook(self):
         self.gwv = GiveawayPanel(self, " ")
-        for v in (self.gwv, TicketOpenView(), TicketActionView(), AppOpenPanel(" "), HelpPanel(self, " "), OwnerPanel(self, " "), ReklamPanel()): self.add_view(v)
+        for v in (self.gwv, TicketOpenView(), TicketActionView(), AppOpenPanel(" "), HelpPanel(self, " "), OwnerPanel(self, " "), ReklamPanel(), ProjectShareView()): self.add_view(v)
         if V2_OK:
             for mk in (lambda: help_v2(self, " "),):
                 try: self.add_view(mk())
@@ -1629,6 +1630,16 @@ class KatreBot(commands.Bot):
         except Exception: traceback.print_exc()
     async def on_message(self, m):
         if m.author.bot: return
+        # KTMR Projects: owner tarafından seçilen kanala bırakılan içerikleri V2 karta dönüştür.
+        try:
+            ps = db.one("SELECT channel_id FROM project_share_settings WHERE id=1")
+            auto_prefixes = await self.get_prefix(m)
+            is_bot_command = bool(m.content and any(m.content.startswith(px) for px in auto_prefixes))
+            if m.guild and ps and ps.get("channel_id") == m.channel.id and m.author.id == OWNER_ID and not is_bot_command:
+                await publish_project_message(m)
+                return
+        except Exception:
+            traceback.print_exc()
         blocked_by_required_server = False
         try:
             prefs = await self.get_prefix(m)
@@ -3791,6 +3802,8 @@ async def saril(ctx, u: discord.Member):
 # SHOP SİSTEMİ • KATRE BOT v6.5.2 (küçük güncelleme)
 # ═══════════════════════════════════════════════════════════════════
 db.q("CREATE TABLE IF NOT EXISTS guild_shops(guild_id INTEGER PRIMARY KEY, enabled INTEGER DEFAULT 1, title TEXT DEFAULT 'Hizmet Mağazası', description TEXT DEFAULT '', order_channel INTEGER, services TEXT DEFAULT '[]', payments TEXT DEFAULT '[]')")
+db.q("CREATE TABLE IF NOT EXISTS project_share_settings(id INTEGER PRIMARY KEY CHECK(id=1), channel_id INTEGER)")
+db.q("CREATE TABLE IF NOT EXISTS project_share_posts(message_id INTEGER PRIMARY KEY, guild_id INTEGER, channel_id INTEGER, kind TEXT, payload TEXT, title TEXT, description TEXT, created_at TEXT)")
 
 class ShopSetupModal(Modal, title="Shop Ayarları"):
     title_text = TextInput(label="Mağaza başlığı", default="Hizmetlerimiz", max_length=80)
@@ -3864,6 +3877,115 @@ class ShopServiceSelect(Select):
         body=(f"## 💳 Ödeme Yöntemi Seçin\n**Hizmet:** {service['name']} — `{service['price']}`\n\n"
               "Sunucu sahibinin belirlediği yöntemlerden birini seç. Ödeme manuel olarak kontrol edilir.")
         await interaction.response.send_message(body,view=ShopPaymentView(self.guild_id,service,payments),ephemeral=True)
+
+# ─────────────── KTMR PROJECTS • KOD/DOSYA/LİNK PAYLAŞIMI ───────────────
+PROJECT_BRAND = "💎 KTMR Projects"
+PROJECT_NITRO_EMOJI = "💠"
+
+class ProjectShareView(View):
+    """Persistent controls: custom IDs stay registered after bot restarts."""
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    async def interaction_check(self, interaction):
+        return True
+
+    @discord.ui.button(label="İçeriği Aç", emoji="💠", style=discord.ButtonStyle.secondary, custom_id="ktmr:open")
+    async def open_content(self, interaction, button):
+        row = db.one("SELECT * FROM project_share_posts WHERE message_id=?", (interaction.message.id,))
+        if not row:
+            return await interaction.response.send_message("Bu paylaşım kaydı bulunamadı.", ephemeral=True)
+        if row["kind"] == "link":
+            return await interaction.response.send_message("🔗 Link: " + row["payload"][:1800], ephemeral=True)
+        if row["kind"] == "file":
+            return await interaction.response.send_message("💎 Dosyayı indirmek için: " + row["payload"][:1800], ephemeral=True)
+        await interaction.response.send_message("Kod paylaşımı. Ham kodu özel mesajla almak için aşağıdaki butonu kullan.", ephemeral=True)
+
+    @discord.ui.button(label="Kodu Al (DM)", emoji="✨", style=discord.ButtonStyle.success, custom_id="ktmr:code_dm")
+    async def code_dm(self, interaction, button):
+        row = db.one("SELECT * FROM project_share_posts WHERE message_id=?", (interaction.message.id,))
+        if not row:
+            return await interaction.response.send_message("Bu paylaşım kaydı bulunamadı.", ephemeral=True)
+        if row["kind"] != "code":
+            return await interaction.response.send_message("Bu paylaşım bir kod gönderisi değil.", ephemeral=True)
+        payload = row["payload"]
+        try:
+            # Discord DM sınırını aşmamak için kod dosya eki olarak gönderilir.
+            data = discord.File(io.BytesIO(payload.encode("utf-8")), filename="ktmr_project_code.txt")
+            await interaction.user.send("💎 **KTMR Projects — Kod teslimi**\nİstenen kod aşağıdaki dosyada. Kaynağı ve açıklamayı paylaşım kartında bulabilirsin.", file=data)
+            await interaction.response.send_message("✨ Kod DM üzerinden gönderildi!", ephemeral=True)
+        except discord.Forbidden:
+            await interaction.response.send_message("DM gönderilemedi. DM ayarlarını açıp tekrar dene.", ephemeral=True)
+
+async def publish_project_message(message):
+    """Turns an owner post in the configured channel into a persistent branded V2 post."""
+    content = (message.content or "").strip()
+    attachment = message.attachments[0] if message.attachments else None
+    url_match = re.search(r"https?://\S+", content)
+    title = "KTMR Projects • Yeni Paylaşım"
+    description = "KTMR Projects altyapı paylaşımı. İçeriği aşağıdaki kalıcı butonlarla kullanabilirsin."
+    kind, payload = "code", content
+    # Optional format: first line 'Açıklama: ...', remaining content is the code.
+    if content.lower().startswith(("açıklama:", "aciklama:")):
+        lines = content.splitlines()
+        description = lines[0].split(":", 1)[1].strip()[:900] or description
+        payload = "\n".join(lines[1:]).strip()
+    if attachment:
+        kind, payload = "file", attachment.url
+        description = (content or f"**Dosya:** `{attachment.filename}`\nDosyayı indirmek için butona dokun.")[:900]
+        title = "KTMR Projects • Dosya Paylaşımı"
+    elif url_match:
+        kind, payload = "link", url_match.group(0).rstrip(".,)>]")
+        description = (content.replace(url_match.group(0), "[paylaşım bağlantısı]") or description)[:900]
+        title = "KTMR Projects • Bağlantı Paylaşımı"
+    else:
+        if not payload:
+            return
+        if not description or description.startswith("KTMR Projects"):
+            first = next((x.strip() for x in payload.splitlines() if x.strip()), "Kod paylaşımı")
+            description = f"**Açıklama:** {first[:250]}\n\nBu paylaşım KTMR Projects tarafından sağlanmıştır. Kodu DM ile alabilirsin."
+        title = "KTMR Projects • Kod Paylaşımı"
+    # Delete original to avoid duplicate raw content and repost as a polished card.
+    try: await message.delete()
+    except Exception: pass
+    rows = []
+    rows.append(mkbtn("Dosyayı İndir", style=discord.ButtonStyle.link, emoji="💎", url=payload) if kind == "file" else mkbtn("Kodu Al (DM)", style=discord.ButtonStyle.success, emoji="✨", cid="ktmr:code_dm") if kind == "code" else mkbtn("Linke Git", style=discord.ButtonStyle.link, emoji="💠", url=payload))
+    rows.append(mkbtn("Proje Detayı", style=discord.ButtonStyle.secondary, emoji="💠", cid="ktmr:open"))
+    text = f"## 💎 KTMR Projects | {title.split('•')[-1].strip()}\n\n{description}\n\n-# 💠 Güvenilir proje paylaşımı • Kalıcı butonlar • {datetime.datetime.now().strftime('%d.%m.%Y %H:%M')}"
+    view = card_view(text, rows=(_row(*rows),), accent=0x5865F2, footer=False) if HAS_V2 else None
+    try:
+        if view:
+            sent = await message.channel.send(view=view)
+        else:
+            sent = await message.channel.send(text, view=ProjectShareView())
+        db.q("INSERT OR REPLACE INTO project_share_posts(message_id,guild_id,channel_id,kind,payload,title,description,created_at) VALUES(?,?,?,?,?,?,?,?)", (sent.id, message.guild.id, message.channel.id, kind, payload, title, description, datetime.datetime.now().isoformat()))
+        if kind == "code":
+            # Make sure persistent view callbacks are registered for this specific message.
+            try: bot.add_view(ProjectShareView(), message_id=sent.id)
+            except Exception: pass
+    except Exception:
+        traceback.print_exc()
+
+@kategori("owner")
+@bot.command(name="proje-kanal", aliases=["paylasimkanal", "ktmrkanal"], help="[<#kanal>] — KTMR Projects paylaşım kanalını ayarla (yalnızca bot sahibi)")
+async def proje_kanal(ctx, channel: discord.TextChannel = None):
+    if ctx.author.id != OWNER_ID:
+        return await rp(ctx, ER("BOT OWNER GEREKLİ", "Bu komutu yalnızca bot sahibi kullanabilir."))
+    if channel is None:
+        row = db.one("SELECT channel_id FROM project_share_settings WHERE id=1")
+        ch = bot.get_channel(row["channel_id"]) if row and row["channel_id"] else None
+        return await rp(ctx, head("diamond", "KTMR PROJECTS KANALI") + "\n\nMevcut kanal: " + (ch.mention if ch else "Ayarlanmamış") + "\nKullanım: `k!proje-kanal #kanal`")
+    db.q("INSERT OR REPLACE INTO project_share_settings(id,channel_id) VALUES(1,?)", (channel.id,))
+    await rp(ctx, OK("KTMR PROJECTS HAZIR", f"Paylaşım kanalı {channel.mention} olarak ayarlandı. Bu kanala gönderdiğin dosya, bağlantı veya kod otomatik olarak Components V2 kartına dönüştürülecek."))
+
+@kategori("owner")
+@bot.command(name="proje-bilgi", aliases=["ktmrbilgi"], help="KTMR Projects paylaşım sistemi durumu (yalnızca bot sahibi)")
+async def proje_bilgi(ctx):
+    if ctx.author.id != OWNER_ID: return await rp(ctx, ER("BOT OWNER GEREKLİ", "Bu komutu yalnızca bot sahibi kullanabilir."))
+    row = db.one("SELECT channel_id FROM project_share_settings WHERE id=1")
+    ch = bot.get_channel(row["channel_id"]) if row and row["channel_id"] else None
+    count = db.one("SELECT COUNT(*) AS n FROM project_share_posts")
+    await rp(ctx, head("diamond", "KTMR PROJECTS • SİSTEM DURUMU") + f"\n\n**Paylaşım kanalı:** {ch.mention if ch else 'Ayarlanmamış'}\n**Kayıtlı paylaşım:** {count['n'] if count else 0}\n**Kalıcı butonlar:** Aktif\n**Marka:** 💎 KTMR Projects\n\n`k!proje-kanal #kanal` ile kanal belirle.")
 
 class ShopSettingsPanel(View):
     def __init__(self,guild_id): super().__init__(timeout=180); self.guild_id=guild_id
