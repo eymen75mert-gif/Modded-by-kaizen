@@ -4191,6 +4191,860 @@ async def magaza(ctx,alt="panel"):
         except Exception: pass
     await rp(ctx,body,view=ShopServiceSelect(ctx.guild.id,services))
 
+# ═══════════════════════════════════════════════════════════════════
+#  💧 KATRE BOT v7.0 — GENİŞLETME MODÜLÜ (Components V2)
+#  KURULUM: Bu dosyanın TAMAMINI ana dosyanda şu satırın HEMEN ÜSTÜNE yapıştır:
+#           if __name__ == "__main__":
+#  Eski `k!mağaza` ve `k!proje` komutlarını kaldırıp yerine yenilerini koyar.
+#  Gereksinim: discord.py >= 2.6
+# ═══════════════════════════════════════════════════════════════════
+import math
+
+BOT_VERSION = "7.0.0"
+CHANGELOG["7.0.0"] = [
+    "🛍️ Mağaza v2: ürün/stok/kategori, kupon, coin ile anında satın alma, sipariş yönetim butonları, otomatik rol teslimi, iade sistemi.",
+    "💎 Proje sistemi v2: katalog, arama, çoklu dosya/kod/link, beğeni, indirme sayacı, sürüm notları, Pro'ya özel projeler.",
+    "💡 Öneri sistemi: oylamalı V2 kartları ve yetkili kararları.",
+]
+VERSION_TAGLINE["7.0.0"] = "Mağaza v2 • Proje kataloğu • Öneri sistemi"
+
+for _n in ("mağaza", "proje"):
+    try: bot.remove_command(_n)
+    except Exception: pass
+
+db.conn.executescript("""
+CREATE TABLE IF NOT EXISTS shop_settings(guild_id INTEGER PRIMARY KEY, enabled INTEGER DEFAULT 1, title TEXT DEFAULT 'Katre Mağaza', description TEXT DEFAULT '', banner TEXT DEFAULT '', order_channel INTEGER DEFAULT 0, log_channel INTEGER DEFAULT 0, staff_role INTEGER DEFAULT 0, payments TEXT DEFAULT '[]', color INTEGER DEFAULT 5793266, panel_channel INTEGER DEFAULT 0, panel_message INTEGER DEFAULT 0);
+CREATE TABLE IF NOT EXISTS shop_products(id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id INTEGER, name TEXT, price REAL DEFAULT 0, currency TEXT DEFAULT 'coin', description TEXT DEFAULT '', stock INTEGER DEFAULT -1, category TEXT DEFAULT 'Genel', emoji TEXT DEFAULT '🛍️', role_id INTEGER DEFAULT 0, active INTEGER DEFAULT 1, sold INTEGER DEFAULT 0, image TEXT DEFAULT '', featured INTEGER DEFAULT 0, created_at TEXT);
+CREATE TABLE IF NOT EXISTS shop_orders(id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id INTEGER, user_id INTEGER, product_id INTEGER, product_name TEXT, price REAL, currency TEXT, payment TEXT, status TEXT DEFAULT 'pending', note TEXT DEFAULT '', coupon TEXT DEFAULT '', channel_id INTEGER DEFAULT 0, message_id INTEGER DEFAULT 0, handled_by INTEGER DEFAULT 0, created_at TEXT, updated_at TEXT, paid_coins REAL DEFAULT 0);
+CREATE TABLE IF NOT EXISTS shop_coupons(guild_id INTEGER, code TEXT, percent INTEGER, uses_left INTEGER DEFAULT -1, expires TEXT DEFAULT '', PRIMARY KEY(guild_id,code));
+CREATE TABLE IF NOT EXISTS projects(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, emoji TEXT DEFAULT '💎', category TEXT DEFAULT 'Genel', description TEXT, version TEXT DEFAULT '1.0.0', tags TEXT DEFAULT '', banner TEXT DEFAULT '', status TEXT DEFAULT 'published', downloads INTEGER DEFAULT 0, likes INTEGER DEFAULT 0, views INTEGER DEFAULT 0, pro_only INTEGER DEFAULT 0, guild_id INTEGER DEFAULT 0, channel_id INTEGER DEFAULT 0, message_id INTEGER DEFAULT 0, created_at TEXT, updated_at TEXT);
+CREATE TABLE IF NOT EXISTS project_assets(id INTEGER PRIMARY KEY AUTOINCREMENT, project_id INTEGER, label TEXT, kind TEXT, payload TEXT);
+CREATE TABLE IF NOT EXISTS project_likes(project_id INTEGER, user_id INTEGER, PRIMARY KEY(project_id,user_id));
+CREATE TABLE IF NOT EXISTS project_changelog(id INTEGER PRIMARY KEY AUTOINCREMENT, project_id INTEGER, version TEXT, notes TEXT, ts TEXT);
+CREATE TABLE IF NOT EXISTS project_dl_log(id INTEGER PRIMARY KEY AUTOINCREMENT, project_id INTEGER, user_id INTEGER, asset_id INTEGER, ts TEXT);
+CREATE TABLE IF NOT EXISTS suggestions(id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id INTEGER, user_id INTEGER, text TEXT, status TEXT DEFAULT 'open', channel_id INTEGER DEFAULT 0, message_id INTEGER DEFAULT 0, up INTEGER DEFAULT 0, down INTEGER DEFAULT 0, staff_note TEXT DEFAULT '', created_at TEXT);
+CREATE TABLE IF NOT EXISTS suggestion_votes(sid INTEGER, user_id INTEGER, vote INTEGER, PRIMARY KEY(sid,user_id));
+""")
+
+# ───────────────────────── ORTAK YARDIMCILAR ─────────────────────────
+class WizardCancel(Exception): pass
+WIZ_ACTIVE = set()
+_orig_publish_project_message = publish_project_message
+async def publish_project_message(message):
+    # Sihirbaz çalışırken yanıt mesajları eski otomatik kart sistemine takılmasın.
+    if (message.channel.id, message.author.id) in WIZ_ACTIVE: return
+    return await _orig_publish_project_message(message)
+
+def _now(): return datetime.datetime.now().isoformat(timespec="seconds")
+def _ts(iso):
+    try: return int(datetime.datetime.fromisoformat(iso).timestamp())
+    except Exception: return int(time.time())
+def fmt_price(p, c):
+    p = float(p or 0)
+    return (str(int(p)) if p == int(p) else "%.2f" % p) + " " + str(c)
+def semoji(x):
+    x = (x or "").strip()
+    if x and (re.match(r"^<a?:\w+:\d+>$", x) or (len(x) <= 8 and not x.isascii())): return x
+    return None
+
+def v2card(title, body="", rows=(), color=0x5865F2, thumb=None, footer=None, timeout=None):
+    con = _new_con(color)
+    ht = TextDisplay(("## " + str(title))[:300])
+    item = None
+    if thumb and Section is not None and Thumbnail is not None:
+        try: item = Section(ht, accessory=Thumbnail(str(thumb)))
+        except Exception: item = None
+    con.add_item(item or ht)
+    if body:
+        _sep(con); con.add_item(TextDisplay(str(body)[:3200]))
+    for r in rows: con.add_item(r)
+    if footer:
+        _sep(con, False); con.add_item(TextDisplay(("-# " + footer)[:200]))
+    lv = LayoutView(timeout=timeout); lv.add_item(con); return lv
+
+NOTE_STYLE = {"ok": ("✅", 0x57F287), "er": ("❌", 0xED4245), "wn": ("⚠️", 0xFEE75C), "in": ("ℹ️", 0x5865F2)}
+def note(kind, title, body=""):
+    em, col = NOTE_STYLE[kind]
+    return v2card(em + " " + title, body, color=col, footer="Katre Bot v" + BOT_VERSION)
+
+async def esend(it, view):
+    if it.response.is_done(): return await it.followup.send(view=view, ephemeral=True)
+    return await it.response.send_message(view=view, ephemeral=True)
+
+class TextModal(Modal):
+    def __init__(self, title, label, cb, required=True, style=discord.TextStyle.paragraph, maxlen=800):
+        super().__init__(title=title[:45]); self.cb = cb
+        self.t = TextInput(label=label[:45], style=style, required=required, max_length=maxlen); self.add_item(self.t)
+    async def on_submit(self, it): await self.cb(it, self.t.value.strip())
+
+# ═══════════════════════════════════════════════════════════════════
+# 🛍️ MAĞAZA v2
+# ═══════════════════════════════════════════════════════════════════
+SHOP_COIN = "💰 Coin Bakiyesi"
+ST_EMOJI = {"pending": "⏳", "approved": "💳", "delivered": "📦", "rejected": "❌", "cancelled": "🚫"}
+ST_TEXT = {"pending": "Ödeme bekleniyor", "approved": "Ödeme onaylandı", "delivered": "Teslim edildi", "rejected": "Reddedildi", "cancelled": "İptal edildi"}
+ST_COLOR = {"pending": 0xFEE75C, "approved": 0x3498DB, "delivered": 0x57F287, "rejected": 0xED4245, "cancelled": 0x95A5A6}
+
+def sget(gid):
+    db.q("INSERT OR IGNORE INTO shop_settings(guild_id) VALUES(?)", (gid,))
+    return db.one("SELECT * FROM shop_settings WHERE guild_id=?", (gid,))
+def spay(s):
+    try: return json.loads(s.get("payments") or "[]")
+    except Exception: return []
+def stock_txt(p): return "∞" if p["stock"] < 0 else ("Tükendi" if p["stock"] == 0 else str(p["stock"]))
+def prod_line(p):
+    return (p["emoji"] or "🛍️") + " " + ("⭐ " if p["featured"] else "") + "**" + p["name"] + "** · `#" + str(p["id"]) + "` · `" + fmt_price(p["price"], p["currency"]) + "` · stok `" + stock_txt(p) + "`"
+def shop_staff(it):
+    m = it.user; s = sget(it.guild.id)
+    return m.id == OWNER_ID or m.guild_permissions.administrator or bool(s["staff_role"] and any(r.id == s["staff_role"] for r in m.roles))
+def shop_staff_ctx(ctx):
+    m = ctx.author; s = sget(ctx.guild.id)
+    return m.id == OWNER_ID or m.guild_permissions.administrator or bool(s["staff_role"] and any(r.id == s["staff_role"] for r in m.roles))
+
+def shop_front(guild):
+    s = sget(guild.id) if guild else {"title": "Mağaza", "description": "", "banner": "", "color": 5793266}
+    prods = db.all("SELECT * FROM shop_products WHERE guild_id=? AND active=1 ORDER BY featured DESC, category, id", (guild.id,)) if guild else []
+    cats = {}
+    for p in prods: cats.setdefault(p["category"], []).append(p)
+    lines = []
+    for c, items in cats.items():
+        lines.append("### 📁 " + c)
+        lines += [prod_line(p) for p in items[:10]]
+        if len(items) > 10: lines.append("-# … +" + str(len(items) - 10) + " ürün daha (kategori menüsünden gör)")
+    body = (s["description"] or "Bir ürün seç, ödeme yöntemini belirle; siparişin anında yetkililere ulaşsın.") + "\n\n" + ("\n".join(lines) if lines else "_Henüz ürün eklenmemiş._")
+    dummy = discord.SelectOption(label="—", value="0")
+    opts = [discord.SelectOption(label=p["name"][:100], value=str(p["id"]), description=(fmt_price(p["price"], p["currency"]) + " • " + (p["description"] or ""))[:100], emoji=semoji(p["emoji"])) for p in prods[:25]] or [dummy]
+    copts = [discord.SelectOption(label=c[:100], value=c[:100], description=str(len(v)) + " ürün") for c, v in list(cats.items())[:25]] or [dummy]
+    pick = Select(placeholder="🛍️ Ürün seç…", options=opts, custom_id="kshop:pick")
+    cat = Select(placeholder="📁 Kategoriye göz at…", options=copts, custom_id="kshop:cat")
+    async def pick_cb(it): await show_product(it, int(pick.values[0]))
+    async def cat_cb(it):
+        ps = db.all("SELECT * FROM shop_products WHERE guild_id=? AND active=1 AND category=? ORDER BY featured DESC, id LIMIT 25", (it.guild.id, cat.values[0]))
+        if not ps: return await esend(it, note("wn", "KATEGORİ BOŞ", "Bu kategoride ürün yok."))
+        sel = Select(placeholder="Ürün seç…", options=[discord.SelectOption(label=p["name"][:100], value=str(p["id"]), description=fmt_price(p["price"], p["currency"]), emoji=semoji(p["emoji"])) for p in ps])
+        async def scb(i2): await show_product(i2, int(sel.values[0]))
+        sel.callback = scb
+        await esend(it, v2card("📁 " + cat.values[0], "\n".join(prod_line(p) for p in ps)[:3000], (_row(sel),), timeout=300))
+    pick.callback = pick_cb; cat.callback = cat_cb
+    async def mine(it): await esend(it, my_orders_view(it.guild.id, it.user.id))
+    rows = (_row(pick), _row(cat), _row(mkbtn("Siparişlerim", mine, discord.ButtonStyle.secondary, "📦", "kshop:mine")))
+    return v2card("🛍️ " + (s["title"] or "Mağaza"), body, rows, color=s["color"] or 0x5865F2, thumb=(s["banner"] or None), footer="Satın alma güvenli • siparişler yetkililer tarafından onaylanır")
+
+async def show_product(it, pid):
+    p = db.one("SELECT * FROM shop_products WHERE id=? AND guild_id=? AND active=1", (pid, it.guild.id))
+    if not p: return await esend(it, note("er", "ÜRÜN BULUNAMADI", "Bu ürün kaldırılmış veya pasif."))
+    s = sget(it.guild.id)
+    pays = ([SHOP_COIN] if str(p["currency"]).lower() == "coin" else []) + spay(s)
+    body = (p["description"] or "Açıklama yok.") + "\n\n**Fiyat:** `" + fmt_price(p["price"], p["currency"]) + "`\n**Stok:** `" + stock_txt(p) + "` • **Satılan:** `" + str(p["sold"]) + "`\n**Kategori:** " + p["category"]
+    if p["role_id"]: body += "\n🎁 Teslimatta <@&" + str(p["role_id"]) + "> rolü verilir."
+    rows = []
+    if p["stock"] == 0: body += "\n\n❌ **Tükendi**"
+    elif not pays: body += "\n\n⚠️ Ödeme yöntemi ayarlanmamış."
+    else:
+        sel = Select(placeholder="💳 Ödeme yöntemini seç → siparişi başlat", options=[discord.SelectOption(label=x[:100], value=str(i)) for i, x in enumerate(pays[:25])])
+        async def cb(i2): await i2.response.send_modal(OrderModal(p["id"], pays[int(sel.values[0])]))
+        sel.callback = cb; rows.append(_row(sel))
+    await esend(it, v2card((p["emoji"] or "🛍️") + " " + p["name"], body, rows, color=s["color"] or 0x5865F2, thumb=(p["image"] or None), timeout=300))
+
+class OrderModal(Modal, title="Sipariş Detayları"):
+    detail = TextInput(label="Not / teslimat bilgisi", style=discord.TextStyle.paragraph, required=False, max_length=600, placeholder="Kullanıcı adın, özel istek…")
+    coupon = TextInput(label="Kupon kodu (varsa)", required=False, max_length=30)
+    def __init__(self, pid, payment):
+        super().__init__(); self.pid = pid; self.payment = payment
+    async def on_submit(self, it):
+        await it.response.defer(ephemeral=True, thinking=True)
+        err, o = await create_order(it, self.pid, self.payment, self.detail.value, self.coupon.value)
+        if err: return await it.followup.send(view=note("er", "SİPARİŞ OLUŞTURULAMADI", err), ephemeral=True)
+        extra = "\n💰 Ödeme coin bakiyenden alındı." if o["paid_coins"] else "\nÖdeme yetkili tarafından kontrol edilecek."
+        await it.followup.send(view=note("ok", "SİPARİŞ ALINDI #" + str(o["id"]), "**" + o["product_name"] + "** • `" + fmt_price(o["price"], o["currency"]) + "`" + extra + "\nDurumu `k!siparişlerim` ile takip edebilirsin."), ephemeral=True)
+
+async def create_order(it, pid, payment, note_txt, coupon_code):
+    g = it.guild; s = sget(g.id)
+    if not s["enabled"]: return "Mağaza şu anda kapalı.", None
+    p = db.one("SELECT * FROM shop_products WHERE id=? AND guild_id=? AND active=1", (pid, g.id))
+    if not p: return "Ürün bulunamadı.", None
+    och = g.get_channel(s["order_channel"]) if s["order_channel"] else None
+    if not isinstance(och, discord.TextChannel): return "Sipariş kanalı ayarlanmamış. Yetkili `k!mağaza ayar kanal #kanal` kullanmalı.", None
+    if db.one("SELECT COUNT(*) n FROM shop_orders WHERE guild_id=? AND user_id=? AND status IN ('pending','approved')", (g.id, it.user.id))["n"] >= 3:
+        return "En fazla 3 açık siparişin olabilir. Önce mevcutların sonuçlanmasını bekle.", None
+    price = float(p["price"]); cpn = ""
+    code = (coupon_code or "").strip().upper()
+    if code:
+        c = db.one("SELECT * FROM shop_coupons WHERE guild_id=? AND code=?", (g.id, code))
+        if not c or c["uses_left"] == 0: return "Kupon geçersiz veya kullanım hakkı bitmiş.", None
+        if c["expires"]:
+            try:
+                if datetime.datetime.now() > datetime.datetime.fromisoformat(c["expires"]): return "Kuponun süresi dolmuş.", None
+            except ValueError: pass
+        price = round(price * (100 - c["percent"]) / 100, 2); cpn = code + " (-%" + str(c["percent"]) + ")"
+    coin = payment == SHOP_COIN
+    cost = int(round(price))
+    if coin:
+        if str(p["currency"]).lower() != "coin": return "Bu ürün coin ile alınamaz.", None
+        ensure_user(it.user.id, str(it.user))
+        bal = db.one("SELECT coins FROM users WHERE user_id=?", (it.user.id,))["coins"]
+        if bal < cost: return "Bakiyen yetersiz: **" + str(bal) + "** coin var, **" + str(cost) + "** gerekli.", None
+    if p["stock"] >= 0:
+        cur = db.q("UPDATE shop_products SET stock=stock-1 WHERE id=? AND stock>0", (pid,))
+        if cur.rowcount < 1: return "Ürün tükendi.", None
+    paid = 0
+    if coin:
+        db.q("UPDATE users SET coins=coins-? WHERE user_id=?", (cost, it.user.id)); paid = cost
+    if code: db.q("UPDATE shop_coupons SET uses_left=uses_left-1 WHERE guild_id=? AND code=? AND uses_left>0", (g.id, code))
+    cur = db.q("INSERT INTO shop_orders(guild_id,user_id,product_id,product_name,price,currency,payment,status,note,coupon,created_at,updated_at,paid_coins) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
+               (g.id, it.user.id, pid, p["name"], price, p["currency"], payment, "approved" if coin else "pending", (note_txt or "").strip()[:600], cpn, _now(), _now(), paid))
+    o = db.one("SELECT * FROM shop_orders WHERE id=?", (cur.lastrowid,))
+    try:
+        if s["staff_role"]:
+            await och.send("<@&" + str(s["staff_role"]) + "> yeni sipariş!", allowed_mentions=discord.AllowedMentions(roles=True))
+        msg = await och.send(view=order_view(o))
+        db.q("UPDATE shop_orders SET channel_id=?, message_id=? WHERE id=?", (och.id, msg.id, o["id"]))
+    except Exception as ex:
+        await set_status(g, o, "cancelled", g.me, "Sipariş kanalına gönderilemedi")
+        return "Sipariş kanalına yazamadım; bot izinlerini kontrol et. (`" + type(ex).__name__ + "`)", None
+    o = db.one("SELECT * FROM shop_orders WHERE id=?", (o["id"],))
+    if coin and p["role_id"]:
+        o = await set_status(g, o, "delivered", g.me, "Otomatik teslim"); await refresh_order_msg(g, o)
+    return None, o
+
+def order_view(o, buttons=True):
+    st = o["status"]
+    body = ("**Müşteri:** <@" + str(o["user_id"]) + ">\n**Ürün:** " + str(o["product_name"]) + " (`#" + str(o["product_id"]) + "`)\n**Tutar:** `" + fmt_price(o["price"], o["currency"]) + "`\n**Ödeme:** " + str(o["payment"]) +
+            ("\n**Kupon:** " + o["coupon"] if o["coupon"] else "") + "\n**Durum:** " + ST_EMOJI[st] + " " + ST_TEXT[st] +
+            ("\n**İşleyen:** <@" + str(o["handled_by"]) + ">" if o["handled_by"] else "") + "\n**Tarih:** <t:" + str(_ts(o["created_at"])) + ":R>" +
+            ("\n\n**Not**\n" + o["note"][:900] if o["note"] else ""))
+    rows = ()
+    if buttons and st == "pending":
+        rows = (_row(mkbtn("Ödemeyi Onayla", o_ok, discord.ButtonStyle.success, "✅", "kshop:o_ok"), mkbtn("Teslim Et", o_dl, discord.ButtonStyle.primary, "📦", "kshop:o_dl"),
+                     mkbtn("Reddet", o_rj, discord.ButtonStyle.danger, "❌", "kshop:o_rj"), mkbtn("Mesaj Yaz", o_dm, discord.ButtonStyle.secondary, "💬", "kshop:o_dm")),)
+    elif buttons and st == "approved":
+        rows = (_row(mkbtn("Teslim Et", o_dl, discord.ButtonStyle.primary, "📦", "kshop:o_dl"), mkbtn("Reddet / İade", o_rj, discord.ButtonStyle.danger, "❌", "kshop:o_rj"), mkbtn("Mesaj Yaz", o_dm, discord.ButtonStyle.secondary, "💬", "kshop:o_dm")),)
+    return v2card("🧾 SİPARİŞ #" + str(o["id"]), body, rows, color=ST_COLOR[st], footer="Katre Mağaza")
+
+async def _order_ctx(it):
+    o = db.one("SELECT * FROM shop_orders WHERE message_id=?", (it.message.id,))
+    if not o:
+        await esend(it, note("er", "SİPARİŞ BULUNAMADI", "Bu mesaja ait kayıt yok.")); return None
+    if not shop_staff(it):
+        await esend(it, note("er", "YETKİN YOK", "Sadece mağaza yetkilileri işlem yapabilir.")); return None
+    return o
+
+async def refresh_order_msg(guild, o):
+    try:
+        ch = guild.get_channel(o["channel_id"]); m = await ch.fetch_message(o["message_id"]); await m.edit(view=order_view(o))
+    except Exception: pass
+
+async def set_status(guild, o, new, by, reason=""):
+    old = o["status"]
+    if old in ("delivered", "rejected", "cancelled"): return o
+    notes = (o["note"] or "") + (("\n[" + ST_TEXT[new] + "] " + reason) if reason else "")
+    db.q("UPDATE shop_orders SET status=?, handled_by=?, updated_at=?, note=? WHERE id=?", (new, by.id, _now(), notes[:1500], o["id"]))
+    p = db.one("SELECT * FROM shop_products WHERE id=?", (o["product_id"],))
+    refunded = False
+    if new == "delivered" and p:
+        db.q("UPDATE shop_products SET sold=sold+1 WHERE id=?", (p["id"],))
+        if p["role_id"]:
+            m = guild.get_member(o["user_id"]); r = guild.get_role(p["role_id"])
+            if m and r:
+                try: await m.add_roles(r, reason="Mağaza siparişi #" + str(o["id"]))
+                except Exception: pass
+    if new in ("rejected", "cancelled"):
+        if p and p["stock"] >= 0: db.q("UPDATE shop_products SET stock=stock+1 WHERE id=?", (p["id"],))
+        if o["paid_coins"] and o["paid_coins"] > 0:
+            db.q("UPDATE users SET coins=coins+? WHERE user_id=?", (int(o["paid_coins"]), o["user_id"])); refunded = True
+    o2 = db.one("SELECT * FROM shop_orders WHERE id=?", (o["id"],))
+    u = guild.get_member(o["user_id"]) or bot.get_user(o["user_id"])
+    if u:
+        try: await rp_ch(u, head("ticket", "SİPARİŞ #" + str(o["id"]) + " • " + ST_TEXT[new].upper()) + "\n\n**Ürün:** " + str(o["product_name"]) + "\n**Sunucu:** " + guild.name + (("\n**Not:** " + reason) if reason else "") + ("\n💰 Coin iadesi yapıldı." if refunded else ""))
+        except Exception: pass
+    s = sget(guild.id); lc = guild.get_channel(s["log_channel"]) if s["log_channel"] else None
+    if lc:
+        try: await lc.send(view=note("in", "SİPARİŞ #" + str(o["id"]) + " → " + ST_TEXT[new], "Müşteri: <@" + str(o["user_id"]) + ">\nÜrün: " + str(o["product_name"]) + "\nİşleyen: <@" + str(by.id) + ">" + (("\nNot: " + reason) if reason else "")))
+        except Exception: pass
+    return o2
+
+async def o_ok(it):
+    o = await _order_ctx(it)
+    if not o: return
+    if o["status"] != "pending": return await esend(it, note("wn", "UYGUN DEĞİL", "Sadece bekleyen siparişler onaylanabilir."))
+    await it.response.defer(); o2 = await set_status(it.guild, o, "approved", it.user); await refresh_order_msg(it.guild, o2)
+async def o_dl(it):
+    o = await _order_ctx(it)
+    if not o: return
+    if o["status"] not in ("pending", "approved"): return await esend(it, note("wn", "UYGUN DEĞİL", "Bu sipariş artık işlenemez."))
+    await it.response.defer(); o2 = await set_status(it.guild, o, "delivered", it.user); await refresh_order_msg(it.guild, o2)
+async def o_rj(it):
+    o = await _order_ctx(it)
+    if not o: return
+    if o["status"] not in ("pending", "approved"): return await esend(it, note("wn", "UYGUN DEĞİL", "Bu sipariş artık işlenemez."))
+    async def cb(i2, text):
+        await i2.response.defer(ephemeral=True, thinking=True)
+        cur = db.one("SELECT * FROM shop_orders WHERE id=?", (o["id"],))
+        o2 = await set_status(i2.guild, cur, "rejected", i2.user, text or "Sebep belirtilmedi"); await refresh_order_msg(i2.guild, o2)
+        await i2.followup.send(view=note("ok", "SİPARİŞ REDDEDİLDİ", "Stok ve (varsa) coin iadesi yapıldı."), ephemeral=True)
+    await it.response.send_modal(TextModal("Reddetme Sebebi", "Sebep", cb, required=False))
+async def o_dm(it):
+    o = await _order_ctx(it)
+    if not o: return
+    async def cb(i2, text):
+        u = i2.guild.get_member(o["user_id"])
+        try:
+            await rp_ch(u, head("ticket", "SİPARİŞ #" + str(o["id"]) + " • YETKİLİ MESAJI") + "\n\n" + text + "\n\n-# Yetkili: " + i2.user.display_name + " • " + i2.guild.name)
+            await esend(i2, note("ok", "MESAJ GÖNDERİLDİ", "Müşteriye DM iletildi."))
+        except Exception: await esend(i2, note("er", "GÖNDERİLEMEDİ", "Müşterinin DM'i kapalı."))
+    await it.response.send_modal(TextModal("Müşteriye Mesaj", "Mesaj", cb))
+
+def my_orders_view(gid, uid):
+    rs = db.all("SELECT * FROM shop_orders WHERE guild_id=? AND user_id=? ORDER BY id DESC LIMIT 10", (gid, uid))
+    if not rs: return note("in", "SİPARİŞ YOK", "Bu sunucuda henüz siparişin yok.")
+    return v2card("📦 Siparişlerin", "\n".join(ST_EMOJI[r["status"]] + " `#" + str(r["id"]) + "` **" + str(r["product_name"]) + "** · `" + fmt_price(r["price"], r["currency"]) + "` · " + ST_TEXT[r["status"]] + " · <t:" + str(_ts(r["created_at"])) + ":R>" for r in rs),
+                  footer="Bekleyen siparişi iptal: k!siparişiptal <id>")
+
+async def refresh_panel(guild):
+    s = sget(guild.id)
+    if not s["panel_channel"] or not s["panel_message"]: return
+    try:
+        ch = guild.get_channel(s["panel_channel"]); m = await ch.fetch_message(s["panel_message"]); await m.edit(view=shop_front(guild))
+    except Exception: pass
+
+def _need_v2(): return note("er", "COMPONENTS V2 GEREKLİ", "Bu özellik için `discord.py>=2.6` kurulu olmalı.")
+
+@kategori("sys")
+@bot.group(name="mağaza", aliases=["magaza", "dükkan", "store"], invoke_without_command=True, help="Gelişmiş mağaza vitrini • alt komutlar: ekle, düzenle, sil, liste, kupon, ayar, yayınla, siparişler, istatistik")
+@commands.guild_only()
+async def magaza(ctx):
+    if not V2_OK: return await rp(ctx, ER("V2 GEREKLİ", "discord.py>=2.6 gerekli."))
+    if not sget(ctx.guild.id)["enabled"]: return await rp(ctx, WN("MAĞAZA KAPALI", "Bu sunucuda mağaza şu an kapalı."))
+    await ctx.send(view=shop_front(ctx.guild))
+
+@magaza.command(name="ekle", help="<Ad | Fiyat | Para | Stok | Kategori | Açıklama>")
+@commands.has_permissions(administrator=True)
+async def m_ekle(ctx, *, raw: str):
+    pr = [x.strip() for x in raw.split("|")]
+    try:
+        name = pr[0][:80]; price = float(pr[1].replace(",", "."))
+        cur = (pr[2] if len(pr) > 2 and pr[2] else "coin")[:12]
+        stock = int(pr[3]) if len(pr) > 3 and pr[3] else -1
+        cat = (pr[4] if len(pr) > 4 and pr[4] else "Genel")[:30]; desc = pr[5][:400] if len(pr) > 5 else ""
+        if not name or price < 0: raise ValueError
+    except (ValueError, IndexError):
+        return await ctx.send(view=note("er", "FORMAT HATALI", "`k!mağaza ekle Ticket Botu | 400 | Robux | -1 | Botlar | Talep sistemi`\nStok `-1` = sınırsız. Para birimi `coin` ise coin bakiyesiyle alınır."))
+    cur2 = db.q("INSERT INTO shop_products(guild_id,name,price,currency,description,stock,category,created_at) VALUES(?,?,?,?,?,?,?,?)", (ctx.guild.id, name, price, cur, desc, stock, cat, _now()))
+    await refresh_panel(ctx.guild)
+    await ctx.send(view=note("ok", "ÜRÜN EKLENDİ #" + str(cur2.lastrowid), "**" + name + "** • `" + fmt_price(price, cur) + "` • stok `" + ("∞" if stock < 0 else str(stock)) + "`\nDüzenle: `k!mağaza düzenle " + str(cur2.lastrowid) + " <alan> <değer>`"))
+
+PROD_FIELDS = {"ad": "name", "fiyat": "price", "para": "currency", "stok": "stock", "kategori": "category", "açıklama": "description", "aciklama": "description", "emoji": "emoji", "rol": "role_id", "görsel": "image", "gorsel": "image", "öne": "featured", "one": "featured", "aktif": "active"}
+@magaza.command(name="düzenle", aliases=["duzenle"], help="<id> <ad|fiyat|para|stok|kategori|açıklama|emoji|rol|görsel|öne|aktif> <değer>")
+@commands.has_permissions(administrator=True)
+async def m_duzenle(ctx, pid: int, alan: str, *, deger: str):
+    col = PROD_FIELDS.get(alan.lower())
+    p = db.one("SELECT * FROM shop_products WHERE id=? AND guild_id=?", (pid, ctx.guild.id))
+    if not p: return await ctx.send(view=note("er", "ÜRÜN YOK", "Bu ID ile ürün bulunamadı."))
+    if not col: return await ctx.send(view=note("er", "GEÇERSİZ ALAN", "Alanlar: " + ", ".join("`" + k + "`" for k in ("ad", "fiyat", "para", "stok", "kategori", "açıklama", "emoji", "rol", "görsel", "öne", "aktif"))))
+    try:
+        if col in ("price",): v = float(deger.replace(",", "."))
+        elif col in ("stock", "featured", "active"): v = int(deger)
+        elif col == "role_id": v = 0 if deger.strip() in ("0", "-", "yok") else (await commands.RoleConverter().convert(ctx, deger.strip())).id
+        else: v = deger.strip()
+    except (ValueError, commands.BadArgument):
+        return await ctx.send(view=note("er", "GEÇERSİZ DEĞER", "Bu alan için uygun bir değer gir."))
+    db.q("UPDATE shop_products SET " + col + "=? WHERE id=?", (v, pid)); await refresh_panel(ctx.guild)
+    await ctx.send(view=note("ok", "ÜRÜN GÜNCELLENDİ", "`#" + str(pid) + "` → **" + alan + "** güncellendi."))
+
+@magaza.command(name="sil", help="<id>")
+@commands.has_permissions(administrator=True)
+async def m_sil(ctx, pid: int):
+    cur = db.q("DELETE FROM shop_products WHERE id=? AND guild_id=?", (pid, ctx.guild.id)); await refresh_panel(ctx.guild)
+    await ctx.send(view=note("ok" if cur.rowcount else "er", "ÜRÜN SİLİNDİ" if cur.rowcount else "ÜRÜN YOK", "Mevcut siparişler korunur."))
+
+@magaza.command(name="liste", help="Tüm ürünleri (pasifler dahil) listeler")
+@commands.has_permissions(administrator=True)
+async def m_liste(ctx):
+    ps = db.all("SELECT * FROM shop_products WHERE guild_id=? ORDER BY id", (ctx.guild.id,))
+    await ctx.send(view=v2card("📋 Ürün Listesi (" + str(len(ps)) + ")", "\n".join(("" if p["active"] else "🔕 ") + prod_line(p) for p in ps[:25]) or "Ürün yok."))
+
+@magaza.group(name="kupon", invoke_without_command=True, help="ekle <KOD> <yüzde> [kullanım] [gün] • sil <KOD> • liste")
+@commands.has_permissions(administrator=True)
+async def m_kupon(ctx): await m_kupon_liste(ctx)
+@m_kupon.command(name="ekle")
+async def m_kupon_ekle(ctx, kod: str, yuzde: int, kullanim: int = -1, gun: int = 0):
+    if not 1 <= yuzde <= 100: return await ctx.send(view=note("er", "GEÇERSİZ YÜZDE", "1-100 arası olmalı."))
+    exp = (datetime.datetime.now() + datetime.timedelta(days=gun)).isoformat(timespec="seconds") if gun > 0 else ""
+    db.q("INSERT OR REPLACE INTO shop_coupons(guild_id,code,percent,uses_left,expires) VALUES(?,?,?,?,?)", (ctx.guild.id, kod.upper(), yuzde, kullanim, exp))
+    await ctx.send(view=note("ok", "KUPON OLUŞTURULDU", "`" + kod.upper() + "` • **%" + str(yuzde) + "** indirim • kullanım `" + ("∞" if kullanim < 0 else str(kullanim)) + "`" + ((" • bitiş <t:" + str(_ts(exp)) + ":R>") if exp else "")))
+@m_kupon.command(name="sil")
+async def m_kupon_sil(ctx, kod: str):
+    db.q("DELETE FROM shop_coupons WHERE guild_id=? AND code=?", (ctx.guild.id, kod.upper())); await ctx.send(view=note("ok", "KUPON SİLİNDİ", "`" + kod.upper() + "`"))
+@m_kupon.command(name="liste")
+async def m_kupon_liste(ctx):
+    cs = db.all("SELECT * FROM shop_coupons WHERE guild_id=?", (ctx.guild.id,))
+    await ctx.send(view=v2card("🎟️ Kuponlar", "\n".join("`" + c["code"] + "` · %" + str(c["percent"]) + " · kalan `" + ("∞" if c["uses_left"] < 0 else str(c["uses_left"])) + "`" for c in cs) or "Kupon yok."))
+
+@magaza.command(name="ayar", help="[kanal|log|yetkili|ödeme|başlık|açıklama|banner|renk|aç|kapat] [değer]")
+@commands.has_permissions(administrator=True)
+async def m_ayar(ctx, anahtar: str = None, *, deger: str = None):
+    s = sget(ctx.guild.id); k = (anahtar or "").lower()
+    async def ok(t): await ctx.send(view=note("ok", "AYAR KAYDEDİLDİ", t))
+    try:
+        if k == "kanal": ch = await commands.TextChannelConverter().convert(ctx, deger); db.q("UPDATE shop_settings SET order_channel=? WHERE guild_id=?", (ch.id, ctx.guild.id)); return await ok("Sipariş kanalı: " + ch.mention)
+        if k == "log": ch = await commands.TextChannelConverter().convert(ctx, deger); db.q("UPDATE shop_settings SET log_channel=? WHERE guild_id=?", (ch.id, ctx.guild.id)); return await ok("Log kanalı: " + ch.mention)
+        if k == "yetkili": r = await commands.RoleConverter().convert(ctx, deger); db.q("UPDATE shop_settings SET staff_role=? WHERE guild_id=?", (r.id, ctx.guild.id)); return await ok("Mağaza yetkilisi: " + r.mention)
+        if k in ("ödeme", "odeme"):
+            pays = spay(s); a = (deger or "").split(None, 1)
+            if len(a) == 2 and a[0].lower() == "ekle" and len(pays) < 20: pays.append(a[1][:80])
+            elif len(a) == 2 and a[0].lower() == "sil" and a[1].isdigit() and 1 <= int(a[1]) <= len(pays): pays.pop(int(a[1]) - 1)
+            else: return await ctx.send(view=note("in", "ÖDEME YÖNTEMLERİ", "\n".join(str(i + 1) + ". " + x for i, x in enumerate(pays)) + "\n\n`k!mağaza ayar ödeme ekle Papara` • `k!mağaza ayar ödeme sil 1`"))
+            db.q("UPDATE shop_settings SET payments=? WHERE guild_id=?", (json.dumps(pays, ensure_ascii=False), ctx.guild.id)); return await ok("Ödeme yöntemleri güncellendi (" + str(len(pays)) + ").")
+        if k in ("başlık", "baslik") and deger: db.q("UPDATE shop_settings SET title=? WHERE guild_id=?", (deger[:80], ctx.guild.id)); await refresh_panel(ctx.guild); return await ok("Başlık güncellendi.")
+        if k in ("açıklama", "aciklama") and deger: db.q("UPDATE shop_settings SET description=? WHERE guild_id=?", (deger[:600], ctx.guild.id)); await refresh_panel(ctx.guild); return await ok("Açıklama güncellendi.")
+        if k == "banner" and deger: db.q("UPDATE shop_settings SET banner=? WHERE guild_id=?", ("" if deger == "-" else deger[:300], ctx.guild.id)); await refresh_panel(ctx.guild); return await ok("Banner güncellendi.")
+        if k == "renk" and deger: db.q("UPDATE shop_settings SET color=? WHERE guild_id=?", (int(deger.lstrip("#"), 16), ctx.guild.id)); await refresh_panel(ctx.guild); return await ok("Renk güncellendi.")
+        if k in ("aç", "ac", "kapat"): db.q("UPDATE shop_settings SET enabled=? WHERE guild_id=?", (0 if k == "kapat" else 1, ctx.guild.id)); return await ok("Mağaza " + ("kapatıldı." if k == "kapat" else "açıldı."))
+    except (commands.BadArgument, ValueError, AttributeError):
+        return await ctx.send(view=note("er", "GEÇERSİZ DEĞER", "Değeri kontrol et: `k!mağaza ayar " + k + " <değer>`"))
+    s = sget(ctx.guild.id)
+    await ctx.send(view=v2card("⚙️ Mağaza Ayarları", "**Durum:** " + ("🟢 Açık" if s["enabled"] else "🔴 Kapalı") + "\n**Sipariş kanalı:** " + (("<#" + str(s["order_channel"]) + ">") if s["order_channel"] else "—") +
+        "\n**Log kanalı:** " + (("<#" + str(s["log_channel"]) + ">") if s["log_channel"] else "—") + "\n**Yetkili rol:** " + (("<@&" + str(s["staff_role"]) + ">") if s["staff_role"] else "Sadece Administrator") +
+        "\n**Ödeme yöntemleri:** " + (", ".join(spay(s)) or "—") + "\n\n`kanal` `log` `yetkili` `ödeme` `başlık` `açıklama` `banner` `renk` `aç` `kapat`"))
+
+@magaza.command(name="yayınla", aliases=["yayinla", "panel"], help="[#kanal] — kalıcı vitrin mesajı gönderir")
+@commands.has_permissions(administrator=True)
+async def m_yayinla(ctx, kanal: discord.TextChannel = None):
+    kanal = kanal or ctx.channel; msg = await kanal.send(view=shop_front(ctx.guild))
+    db.q("UPDATE shop_settings SET panel_channel=?, panel_message=? WHERE guild_id=?", (kanal.id, msg.id, ctx.guild.id))
+    await ctx.send(view=note("ok", "VİTRİN YAYINLANDI", "Ürün değişikliklerinde otomatik güncellenir: " + msg.jump_url))
+
+@magaza.command(name="siparişler", aliases=["siparisler"], help="[durum] — son siparişler")
+async def m_siparisler(ctx, durum: str = None):
+    if not shop_staff_ctx(ctx): return await ctx.send(view=note("er", "YETKİN YOK", "Sadece mağaza yetkilileri."))
+    sql = "SELECT * FROM shop_orders WHERE guild_id=?"; a = [ctx.guild.id]
+    if durum and durum.lower() in ST_TEXT: sql += " AND status=?"; a.append(durum.lower())
+    rs = db.all(sql + " ORDER BY id DESC LIMIT 15", tuple(a))
+    await ctx.send(view=v2card("🧾 Siparişler", "\n".join(ST_EMOJI[r["status"]] + " `#" + str(r["id"]) + "` <@" + str(r["user_id"]) + "> · **" + str(r["product_name"]) + "** · `" + fmt_price(r["price"], r["currency"]) + "`" for r in rs) or "Sipariş yok.", footer="Durumlar: pending, approved, delivered, rejected, cancelled"))
+
+@magaza.command(name="istatistik", aliases=["stats"], help="Satış istatistikleri")
+async def m_stats(ctx):
+    if not shop_staff_ctx(ctx): return await ctx.send(view=note("er", "YETKİN YOK", "Sadece mağaza yetkilileri."))
+    g = ctx.guild.id; tot = db.one("SELECT COUNT(*) n FROM shop_orders WHERE guild_id=?", (g,))["n"]
+    rev = db.all("SELECT currency, SUM(price) s, COUNT(*) n FROM shop_orders WHERE guild_id=? AND status='delivered' GROUP BY currency", (g,))
+    top = db.all("SELECT name, sold FROM shop_products WHERE guild_id=? ORDER BY sold DESC LIMIT 5", (g,))
+    await ctx.send(view=v2card("📊 Mağaza İstatistikleri", "**Toplam sipariş:** `" + str(tot) + "`\n**Teslim edilen gelir:**\n" + ("\n".join("• `" + fmt_price(r["s"], r["currency"]) + "` (" + str(r["n"]) + " sipariş)" for r in rev) or "• —") +
+        "\n\n**Çok satanlar**\n" + ("\n".join("• " + t["name"] + " — `" + str(t["sold"]) + "`" for t in top) or "• —")))
+
+@magaza.command(name="aktar", help="Eski (v6) mağaza hizmetlerini yeni sisteme aktarır")
+@commands.has_permissions(administrator=True)
+async def m_aktar(ctx):
+    old = db.one("SELECT * FROM guild_shops WHERE guild_id=?", (ctx.guild.id,))
+    if not old: return await ctx.send(view=note("wn", "AKTARILACAK VERİ YOK", "Eski mağaza kaydı bulunamadı."))
+    n = 0
+    for x in json.loads(old["services"] or "[]"):
+        m = re.match(r"\s*([\d.,]+)\s*(.*)", str(x.get("price", "")))
+        price = float(m.group(1).replace(",", ".")) if m else 0; cur = (m.group(2) or "Robux") if m else "Robux"
+        db.q("INSERT INTO shop_products(guild_id,name,price,currency,description,created_at) VALUES(?,?,?,?,?,?)", (ctx.guild.id, x.get("name", "Ürün")[:80], price, cur[:12], x.get("description", "")[:400], _now())); n += 1
+    s = sget(ctx.guild.id)
+    db.q("UPDATE shop_settings SET title=?, description=?, order_channel=?, payments=? WHERE guild_id=?", (old["title"], old["description"], old["order_channel"] or 0, old["payments"] or "[]", ctx.guild.id))
+    await ctx.send(view=note("ok", "AKTARIM TAMAM", "**" + str(n) + "** hizmet ürüne dönüştürüldü. `k!mağaza liste` ile kontrol et."))
+
+@kategori("eco")
+@bot.command(name="siparişlerim", aliases=["siparislerim", "orders"], help="Siparişlerini gösterir")
+@commands.guild_only()
+async def siparislerim(ctx): await ctx.send(view=my_orders_view(ctx.guild.id, ctx.author.id))
+
+@kategori("eco")
+@bot.command(name="siparişiptal", aliases=["siparisiptal"], help="<id> — bekleyen siparişini iptal et")
+@commands.guild_only()
+async def siparisiptal(ctx, oid: int):
+    o = db.one("SELECT * FROM shop_orders WHERE id=? AND guild_id=? AND user_id=?", (oid, ctx.guild.id, ctx.author.id))
+    if not o or o["status"] != "pending": return await ctx.send(view=note("er", "İPTAL EDİLEMEZ", "Sadece kendi **bekleyen** siparişini iptal edebilirsin."))
+    o2 = await set_status(ctx.guild, o, "cancelled", ctx.author, "Müşteri iptal etti"); await refresh_order_msg(ctx.guild, o2)
+    await ctx.send(view=note("ok", "SİPARİŞ İPTAL EDİLDİ", "Stok serbest bırakıldı."))
+
+# ═══════════════════════════════════════════════════════════════════
+# 💎 PROJE SİSTEMİ v2 (KTMR Projects)
+# ═══════════════════════════════════════════════════════════════════
+PROJ_CATS = ["Bot", "Script", "Şablon", "Araç", "Kaynak", "Genel"]
+PROJ_COLORS = {"Bot": 0x5865F2, "Script": 0x2ECC71, "Şablon": 0xEB459E, "Araç": 0xE67E22, "Kaynak": 0x00D9FF, "Genel": 0x9B59B6}
+KIND_EMO = {"code": "💻", "link": "🔗", "depo": "📦"}
+KIND_TXT = {"code": "Kod dosyası", "link": "Bağlantı", "depo": "Dosya"}
+
+def project_post(p):
+    tags = " ".join("`" + t.strip() + "`" for t in (p.get("tags") or "").split(",") if t.strip())
+    body = (p["description"] or "")[:2200] + "\n\n📂 **" + p["category"] + "** • 🏷️ **v" + str(p["version"]) + "** • 📥 **" + str(p["downloads"]) + "** • ❤️ **" + str(p["likes"]) + "**" + (("\n" + tags) if tags else "")
+    rows = (_row(mkbtn("İndir / Al", pj_get, discord.ButtonStyle.success, "📥", "kproj:get"), mkbtn(str(p["likes"]), pj_like, discord.ButtonStyle.secondary, "❤️", "kproj:like"),
+                 mkbtn("Detay", pj_info, discord.ButtonStyle.secondary, "📄", "kproj:info"), mkbtn("Sürüm Notları", pj_log, discord.ButtonStyle.secondary, "📝", "kproj:log")),)
+    return v2card((p["emoji"] or "💎") + " " + p["name"] + ("  💎 PRO" if p["pro_only"] else ""), body, rows, color=PROJ_COLORS.get(p["category"], 0x5865F2), thumb=(p["banner"] or None), footer="💎 KTMR Projects • Proje #" + str(p["id"]))
+
+def proj_by_msg(it): return db.one("SELECT * FROM projects WHERE message_id=?", (it.message.id,))
+async def refresh_post(pid):
+    p = db.one("SELECT * FROM projects WHERE id=?", (pid,))
+    if not p or not p["message_id"]: return
+    try:
+        ch = bot.get_channel(p["channel_id"]) or await bot.fetch_channel(p["channel_id"]); m = await ch.fetch_message(p["message_id"]); await m.edit(view=project_post(p))
+    except Exception: pass
+
+async def start_get(it, p):
+    if p["status"] != "published": return await esend(it, note("er", "PROJE KAPALI", "Bu proje şu an yayında değil."))
+    if p["pro_only"] and not ai_is_pro(it.user.id): return await esend(it, note("wn", "PRO GEREKLİ", "Bu proje yalnızca **Katre Pro** üyelerine özel. `k!pro` yaz."))
+    try:
+        if not await required_guild_member(it.user.id):
+            r = required_guild_settings(); rows = ()
+            if _valid_invite_url(r.get("invite_url")): rows = (_row(mkbtn("Sunucuya Katıl", url=r["invite_url"], emoji="🔗")),)
+            return await esend(it, v2card("⚠️ Sunucuya katılman gerekiyor", str(r.get("message") or "Önce zorunlu sunucuya katıl."), rows))
+    except Exception: pass
+    assets = db.all("SELECT * FROM project_assets WHERE project_id=? ORDER BY id", (p["id"],))
+    if not assets: return await esend(it, note("wn", "İÇERİK YOK", "Bu projeye henüz dosya eklenmemiş."))
+    if len(assets) == 1:
+        await it.response.defer(ephemeral=True, thinking=True); return await deliver_asset(it, p, assets[0])
+    sel = Select(placeholder="Almak istediğini seç…", options=[discord.SelectOption(label=a["label"][:100], value=str(a["id"]), description=KIND_TXT.get(a["kind"], ""), emoji=KIND_EMO.get(a["kind"])) for a in assets[:25]])
+    async def cb(i2):
+        await i2.response.defer(ephemeral=True, thinking=True)
+        a = db.one("SELECT * FROM project_assets WHERE id=?", (int(sel.values[0]),))
+        if a: await deliver_asset(i2, p, a)
+    sel.callback = cb
+    await esend(it, v2card("Hangi dosyayı istiyorsun?", "**" + p["name"] + "** için " + str(len(assets)) + " içerik var.", (_row(sel),), timeout=180))
+
+async def deliver_asset(it, p, a):
+    db.q("UPDATE projects SET downloads=downloads+1 WHERE id=?", (p["id"],))
+    db.q("INSERT INTO project_dl_log(project_id,user_id,asset_id,ts) VALUES(?,?,?,?)", (p["id"], it.user.id, a["id"], _now()))
+    try:
+        if a["kind"] == "code":
+            fn = re.sub(r"[^\w.\-]", "_", a["label"])[:60] or "kod"
+            if "." not in fn: fn += ".txt"
+            await it.followup.send("📥 **" + a["label"] + "** hazır! (" + p["name"] + ")", file=discord.File(io.BytesIO(a["payload"].encode("utf-8")), filename=fn), ephemeral=True)
+        else:
+            url = a["payload"]
+            if a["kind"] == "depo":
+                _, cid, mid = a["payload"].split(":")
+                ch = bot.get_channel(int(cid)) or await bot.fetch_channel(int(cid)); m = await ch.fetch_message(int(mid)); url = m.attachments[0].url
+            await it.followup.send(view=v2card((KIND_EMO.get(a["kind"], "🔗")) + " " + a["label"], "**" + p["name"] + "** için bağlantı hazır. Bağlantı kısa süre geçerli olabilir.", (_row(mkbtn("Aç / İndir", url=url, emoji="📥")),), timeout=120), ephemeral=True)
+    except Exception as ex:
+        await it.followup.send(view=note("er", "TESLİM EDİLEMEDİ", "Dosya alınamadı (`" + type(ex).__name__ + "`). Yöneticiye bildir."), ephemeral=True)
+    await refresh_post(p["id"])
+
+async def pj_get(it):
+    p = proj_by_msg(it)
+    if not p: return await esend(it, note("er", "PROJE BULUNAMADI", "Bu paylaşımın kaydı yok."))
+    await start_get(it, p)
+async def pj_like(it):
+    p = proj_by_msg(it)
+    if not p: return await esend(it, note("er", "PROJE BULUNAMADI", "Bu paylaşımın kaydı yok."))
+    if db.one("SELECT 1 FROM project_likes WHERE project_id=? AND user_id=?", (p["id"], it.user.id)): db.q("DELETE FROM project_likes WHERE project_id=? AND user_id=?", (p["id"], it.user.id))
+    else: db.q("INSERT OR IGNORE INTO project_likes(project_id,user_id) VALUES(?,?)", (p["id"], it.user.id))
+    db.q("UPDATE projects SET likes=(SELECT COUNT(*) FROM project_likes WHERE project_id=?) WHERE id=?", (p["id"], p["id"]))
+    await it.response.edit_message(view=project_post(db.one("SELECT * FROM projects WHERE id=?", (p["id"],))))
+async def pj_info(it):
+    p = proj_by_msg(it)
+    if not p: return await esend(it, note("er", "PROJE BULUNAMADI", "Bu paylaşımın kaydı yok."))
+    db.q("UPDATE projects SET views=views+1 WHERE id=?", (p["id"],))
+    assets = db.all("SELECT label,kind FROM project_assets WHERE project_id=?", (p["id"],))
+    await esend(it, v2card("📄 " + p["name"], "**Sürüm:** `" + str(p["version"]) + "`\n**Kategori:** " + p["category"] + "\n**Erişim:** " + ("💎 Pro" if p["pro_only"] else "Herkes") + "\n**İndirme:** `" + str(p["downloads"]) + "` • **Beğeni:** `" + str(p["likes"]) + "` • **Görüntülenme:** `" + str(p["views"] + 1) + "`\n**Yayın:** <t:" + str(_ts(p["created_at"])) + ":D> • **Güncelleme:** <t:" + str(_ts(p["updated_at"])) + ":R>\n\n**İçerik**\n" + ("\n".join(KIND_EMO.get(a["kind"], "•") + " " + a["label"] for a in assets) or "—"), color=PROJ_COLORS.get(p["category"], 0x5865F2)))
+async def pj_log(it):
+    p = proj_by_msg(it)
+    if not p: return await esend(it, note("er", "PROJE BULUNAMADI", "Bu paylaşımın kaydı yok."))
+    cl = db.all("SELECT * FROM project_changelog WHERE project_id=? ORDER BY id DESC LIMIT 5", (p["id"],))
+    await esend(it, v2card("📝 Sürüm Notları", "\n\n".join("**v" + c["version"] + "** • <t:" + str(_ts(c["ts"])) + ":D>\n" + c["notes"][:500] for c in cl) or "Henüz sürüm notu yok."))
+
+def catalog_view(page=0, cat=None, query=None):
+    sql = "SELECT * FROM projects WHERE status='published'"; a = []
+    if cat: sql += " AND category=?"; a.append(cat)
+    if query: sql += " AND (name LIKE ? OR tags LIKE ? OR description LIKE ?)"; a += ["%" + query + "%"] * 3
+    rs = db.all(sql + " ORDER BY downloads DESC, id DESC", tuple(a)); per = 8
+    pages = max(1, (len(rs) + per - 1) // per); page = max(0, min(page, pages - 1)); chunk = rs[page * per:(page + 1) * per]
+    body = "\n".join((p["emoji"] or "💎") + " `#" + str(p["id"]) + "` **" + p["name"] + "** v" + str(p["version"]) + " · 📂 " + p["category"] + " · 📥 " + str(p["downloads"]) + " · ❤️ " + str(p["likes"]) + (" · 💎" if p["pro_only"] else "") for p in chunk) or "_Sonuç bulunamadı._"
+    cats = [r["category"] for r in db.all("SELECT DISTINCT category FROM projects WHERE status='published'")][:24]
+    rows = []
+    csel = Select(placeholder="📂 Kategori filtresi" + ((": " + cat) if cat else ""), options=[discord.SelectOption(label="Tümü", value="__all__", emoji="🌐")] + [discord.SelectOption(label=c[:100], value=c[:100]) for c in cats])
+    async def ccb(it): v = csel.values[0]; await it.response.edit_message(view=catalog_view(0, None if v == "__all__" else v, query))
+    csel.callback = ccb; rows.append(_row(csel))
+    if chunk:
+        psel = Select(placeholder="🔍 Proje seç…", options=[discord.SelectOption(label=p["name"][:100], value=str(p["id"]), description=(p["category"] + " • v" + str(p["version"]))[:100], emoji=semoji(p["emoji"])) for p in chunk])
+        async def pcb(it):
+            p = db.one("SELECT * FROM projects WHERE id=?", (int(psel.values[0]),))
+            if p: db.q("UPDATE projects SET views=views+1 WHERE id=?", (p["id"],)); await esend(it, project_detail(p))
+        psel.callback = pcb; rows.append(_row(psel))
+    async def prev(it): await it.response.edit_message(view=catalog_view(page - 1, cat, query))
+    async def nxt(it): await it.response.edit_message(view=catalog_view(page + 1, cat, query))
+    b1 = mkbtn("Önceki", prev, discord.ButtonStyle.secondary, "◀"); b1.disabled = page <= 0
+    b2 = mkbtn(str(page + 1) + "/" + str(pages), None, discord.ButtonStyle.secondary); b2.disabled = True
+    b3 = mkbtn("Sonraki", nxt, discord.ButtonStyle.secondary, "▶"); b3.disabled = page >= pages - 1
+    rows.append(_row(b1, b2, b3))
+    return v2card("💎 KTMR Projects Kataloğu", body, rows, color=0x5865F2, footer=str(len(rs)) + " proje" + ((" • arama: " + query) if query else ""), timeout=600)
+
+def project_detail(p):
+    btns = [mkbtn("İndir / Al", (lambda pp: (lambda it: start_get(it, pp)))(p), discord.ButtonStyle.success, "📥")]
+    if p["message_id"] and p["guild_id"]: btns.append(mkbtn("Paylaşıma Git", url="https://discord.com/channels/%d/%d/%d" % (p["guild_id"], p["channel_id"], p["message_id"]), emoji="🔗"))
+    return v2card((p["emoji"] or "💎") + " " + p["name"], (p["description"] or "")[:1500] + "\n\n📂 **" + p["category"] + "** • 🏷️ v" + str(p["version"]) + " • 📥 " + str(p["downloads"]) + " • ❤️ " + str(p["likes"]), (_row(*btns),), color=PROJ_COLORS.get(p["category"], 0x5865F2), thumb=(p["banner"] or None), timeout=300)
+
+@kategori("sys")
+@bot.group(name="proje", aliases=["ktmrproje", "projeler", "projects"], invoke_without_command=True, help="Proje kataloğu • alt komutlar: ara, top, son, yeni, düzenle, sürüm, sil, liste, istatistik")
+async def proje(ctx, *, arama: str = None):
+    if not V2_OK: return await rp(ctx, ER("V2 GEREKLİ", "discord.py>=2.6 gerekli."))
+    await ctx.send(view=catalog_view(0, None, arama))
+
+@proje.command(name="ara", help="<kelime>")
+async def p_ara(ctx, *, kelime: str): await ctx.send(view=catalog_view(0, None, kelime))
+@proje.command(name="top", help="En çok indirilenler")
+async def p_top(ctx):
+    rs = db.all("SELECT * FROM projects WHERE status='published' ORDER BY downloads DESC LIMIT 10")
+    await ctx.send(view=v2card("🏆 En Çok İndirilenler", "\n".join(medal(i) + " " + (r["emoji"] or "💎") + " **" + r["name"] + "** — 📥 `" + str(r["downloads"]) + "` · ❤️ `" + str(r["likes"]) + "`" for i, r in enumerate(rs)) or "Henüz proje yok."))
+@proje.command(name="son", help="Son eklenenler")
+async def p_son(ctx):
+    rs = db.all("SELECT * FROM projects WHERE status='published' ORDER BY id DESC LIMIT 8")
+    await ctx.send(view=v2card("🆕 Son Projeler", "\n".join((r["emoji"] or "💎") + " **" + r["name"] + "** v" + str(r["version"]) + " · <t:" + str(_ts(r["created_at"])) + ":R>" for r in rs) or "Henüz proje yok."))
+
+# ── Sihirbaz yardımcıları ──
+async def ask(ctx, prompt, step, total, skip=True, timeout=300):
+    m = await ctx.send(view=v2card("Adım " + str(step) + "/" + str(total), prompt + "\n\n-# `iptal` yaz → vazgeç" + (" • `-` yaz → atla" if skip else "")))
+    def check(x): return x.author.id == ctx.author.id and x.channel.id == ctx.channel.id
+    try: x = await bot.wait_for("message", check=check, timeout=timeout)
+    except asyncio.TimeoutError:
+        try: await m.delete()
+        except Exception: pass
+        raise WizardCancel()
+    text = (x.content or "").strip(); blobs = []
+    for a in x.attachments[:1]:
+        try:
+            if a.size <= 24 * 1024 * 1024: blobs.append((a.filename, await a.read()))
+        except Exception: pass
+    for d in (x, m):
+        try: await d.delete()
+        except Exception: pass
+    if text.lower() in ("iptal", "cancel"): raise WizardCancel()
+    return text, blobs
+
+async def pick(ctx, prompt, options, step, total):
+    fut = asyncio.get_running_loop().create_future()
+    sel = Select(placeholder="Seç…", options=[discord.SelectOption(label=o[:100], value=o[:100]) for o in options])
+    async def cb(it):
+        if it.user.id != ctx.author.id: return await it.response.send_message("Bu sihirbaz sana ait değil.", ephemeral=True)
+        await it.response.defer()
+        if not fut.done(): fut.set_result(sel.values[0])
+    sel.callback = cb
+    m = await ctx.send(view=v2card("Adım " + str(step) + "/" + str(total), prompt, (_row(sel),), timeout=300))
+    try: return await asyncio.wait_for(fut, 300)
+    except asyncio.TimeoutError: raise WizardCancel()
+    finally:
+        try: await m.delete()
+        except Exception: pass
+
+def proj_depo():
+    r = db.one("SELECT value FROM bot_meta WHERE key='proj_depo'")
+    return bot.get_channel(int(r["value"])) if r else None
+
+async def post_project(pid, channel):
+    p = db.one("SELECT * FROM projects WHERE id=?", (pid,)); m = await channel.send(view=project_post(p))
+    db.q("UPDATE projects SET channel_id=?, message_id=?, guild_id=? WHERE id=?", (channel.id, m.id, channel.guild.id, pid)); return m
+
+@proje.command(name="yeni", aliases=["ekle", "oluştur"], help="Adım adım proje sihirbazı (sadece bot sahibi)")
+@is_owner()
+async def p_yeni(ctx):
+    if not V2_OK: return await rp(ctx, ER("V2 GEREKLİ", "discord.py>=2.6 gerekli."))
+    key = (ctx.channel.id, ctx.author.id); WIZ_ACTIVE.add(key); T = 10
+    try:
+        name, _ = await ask(ctx, "**Proje / bot adı**", 1, T, skip=False)
+        if not name or name == "-": raise WizardCancel()
+        emoji, _ = await ask(ctx, "**Başlık emojisi**\nUnicode veya sunucu/Nitro emojisi yazabilirsin.", 2, T)
+        emoji = "💎" if emoji in ("-", "") else emoji[:60]
+        cat = await pick(ctx, "**Kategori seç**", PROJ_CATS, 3, T)
+        desc, _ = await ask(ctx, "**Açıklama**\nÖzellikler, kurulum, gereksinimler… (Markdown ve emoji desteklenir)", 4, T, skip=False)
+        ver, _ = await ask(ctx, "**Sürüm** (örn. `1.0.0`)", 5, T); ver = "1.0.0" if ver in ("-", "") else ver[:20]
+        tags, _ = await ask(ctx, "**Etiketler** — virgülle ayır (örn. `ticket, v2, python`)", 6, T); tags = "" if tags == "-" else tags[:200]
+        banner, _ = await ask(ctx, "**Küçük görsel (thumbnail)**\nKalıcı bir `https://` görsel bağlantısı gönder.", 7, T); banner = banner if re.match(r"^https?://\S+$", banner) else ""
+        assets = []
+        while len(assets) < 10:
+            opts = ["Kod ekle", "Link ekle", "Dosya yükle"] + (["Bitir"] if assets else [])
+            act = await pick(ctx, "**İçerik ekle** — şu ana kadar **" + str(len(assets)) + "** içerik\nAyrı ayrı dosya/kod/link ekleyebilirsin.", opts, 8, T)
+            if act == "Bitir": break
+            label, _ = await ask(ctx, "**İçerik etiketi** (örn. `main.py`, `Kurulum Rehberi`)", 8, T, skip=False); label = label[:80]
+            if act == "Kod ekle":
+                txt, blobs = await ask(ctx, "**Kodu yapıştır** veya `.py/.txt` dosyası yükle.", 8, T, skip=False)
+                if blobs: txt = blobs[0][1].decode("utf-8", errors="replace")
+                if not txt or txt == "-": continue
+                assets.append((label, "code", txt[:400000]))
+            elif act == "Link ekle":
+                url, _ = await ask(ctx, "**Bağlantı** (`https://…`)", 8, T, skip=False)
+                if re.match(r"^https?://\S+$", url): assets.append((label, "link", url))
+            else:
+                depo = proj_depo()
+                if not depo: await ctx.send(view=note("wn", "DEPO KANALI YOK", "Dosya yüklemek için önce `k!proje depo #özel-kanal` ayarla. Alternatif: Link ekle."), delete_after=10); continue
+                _, blobs = await ask(ctx, "**Dosyayı yükle** (en fazla 24 MB)", 8, T, skip=False)
+                if not blobs: continue
+                dm = await depo.send("📦 **" + name + "** • " + label, file=discord.File(io.BytesIO(blobs[0][1]), filename=blobs[0][0]))
+                assets.append((label, "depo", "depo:%d:%d" % (depo.id, dm.id)))
+        acc = await pick(ctx, "**Erişim**", ["Herkese açık", "Sadece Pro"], 9, T)
+        row = db.one("SELECT channel_id FROM project_share_settings WHERE id=1")
+        dest_opts = ["Bu kanal"] + (["Ayarlı proje kanalı"] if row and row["channel_id"] else [])
+        dest = await pick(ctx, "**Yayın kanalı**", dest_opts, 10, T)
+        channel = ctx.channel if dest == "Bu kanal" else (bot.get_channel(row["channel_id"]) or ctx.channel)
+        draft = {"id": 0, "name": name, "emoji": emoji, "category": cat, "description": desc[:2000], "version": ver, "tags": tags, "banner": banner, "downloads": 0, "likes": 0, "pro_only": 1 if acc == "Sadece Pro" else 0}
+        prev = await ctx.send(view=project_post(draft))
+        ok = await pick(ctx, "**Önizleme yukarıda.** Yayınlansın mı? (" + str(len(assets)) + " içerik • " + channel.mention + ")", ["Yayınla", "İptal"], 10, T)
+        try: await prev.delete()
+        except Exception: pass
+        if ok != "Yayınla": raise WizardCancel()
+        cur = db.q("INSERT INTO projects(name,emoji,category,description,version,tags,banner,pro_only,guild_id,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                   (name[:90], emoji, cat, desc[:2000], ver, tags, banner, draft["pro_only"], ctx.guild.id, _now(), _now()))
+        pid = cur.lastrowid
+        for lb, kd, pl in assets: db.q("INSERT INTO project_assets(project_id,label,kind,payload) VALUES(?,?,?,?)", (pid, lb, kd, pl))
+        db.q("INSERT INTO project_changelog(project_id,version,notes,ts) VALUES(?,?,?,?)", (pid, ver, "İlk sürüm yayınlandı.", _now()))
+        m = await post_project(pid, channel)
+        await ctx.send(view=note("ok", "PROJE YAYINLANDI #" + str(pid), "**" + name + "** → " + m.jump_url))
+    except WizardCancel:
+        await ctx.send(view=note("wn", "SİHİRBAZ KAPANDI", "Proje oluşturma iptal edildi veya zaman aşımına uğradı."), delete_after=10)
+    finally:
+        WIZ_ACTIVE.discard(key)
+
+PROJ_FIELDS = {"ad": "name", "isim": "name", "emoji": "emoji", "kategori": "category", "açıklama": "description", "aciklama": "description", "sürüm": "version", "surum": "version", "etiket": "tags", "banner": "banner", "pro": "pro_only", "durum": "status"}
+@proje.command(name="düzenle", aliases=["duzenle"], help="<id> <ad|emoji|kategori|açıklama|sürüm|etiket|banner|pro|durum> <değer>")
+@is_owner()
+async def p_duzenle(ctx, pid: int, alan: str, *, deger: str):
+    col = PROJ_FIELDS.get(alan.lower())
+    if not db.one("SELECT 1 FROM projects WHERE id=?", (pid,)): return await ctx.send(view=note("er", "PROJE YOK", "Bu ID ile proje bulunamadı."))
+    if not col: return await ctx.send(view=note("er", "GEÇERSİZ ALAN", "Alanlar: `ad emoji kategori açıklama sürüm etiket banner pro durum`"))
+    v = deger.strip()
+    if col == "pro_only": v = 1 if v.lower() in ("1", "evet", "aç", "ac", "açık", "on") else 0
+    elif col == "status":
+        if v.lower() not in ("published", "hidden", "draft"): return await ctx.send(view=note("er", "GEÇERSİZ DURUM", "`published`, `hidden` veya `draft`"))
+        v = v.lower()
+    elif col == "banner" and v == "-": v = ""
+    db.q("UPDATE projects SET " + col + "=?, updated_at=? WHERE id=?", (v, _now(), pid)); await refresh_post(pid)
+    await ctx.send(view=note("ok", "PROJE GÜNCELLENDİ", "`#" + str(pid) + "` → **" + alan + "**"))
+
+@proje.command(name="sürüm", aliases=["surum", "güncelle"], help="<id> <sürüm> [notlar] — yeni sürüm yayınla")
+@is_owner()
+async def p_surum(ctx, pid: int, version: str, *, notlar: str = "Genel iyileştirmeler."):
+    p = db.one("SELECT * FROM projects WHERE id=?", (pid,))
+    if not p: return await ctx.send(view=note("er", "PROJE YOK", "Bu ID ile proje bulunamadı."))
+    db.q("INSERT INTO project_changelog(project_id,version,notes,ts) VALUES(?,?,?,?)", (pid, version[:20], notlar[:900], _now()))
+    db.q("UPDATE projects SET version=?, updated_at=? WHERE id=?", (version[:20], _now(), pid)); await refresh_post(pid)
+    try:
+        ch = bot.get_channel(p["channel_id"]); m = await ch.fetch_message(p["message_id"])
+        await m.reply(view=v2card("🆕 " + p["name"] + " v" + version, notlar[:900], color=0x57F287, footer="Güncelleme • KTMR Projects"), mention_author=False)
+    except Exception: pass
+    await ctx.send(view=note("ok", "SÜRÜM YAYINLANDI", "**" + p["name"] + "** → `v" + version + "`"))
+
+@proje.command(name="varlık-ekle", aliases=["varlik-ekle"], help="<id> <kod|link> <etiket> | <içerik>")
+@is_owner()
+async def p_asset_add(ctx, pid: int, tur: str, *, raw: str):
+    if tur.lower() not in ("kod", "link") or "|" not in raw: return await ctx.send(view=note("er", "FORMAT HATALI", "`k!proje varlık-ekle 3 link Rehber | https://...`\nDosya için `k!proje yeni` sihirbazını kullan."))
+    lb, pl = [x.strip() for x in raw.split("|", 1)]
+    if tur.lower() == "link" and not re.match(r"^https?://\S+$", pl): return await ctx.send(view=note("er", "GEÇERSİZ LİNK", "`https://` ile başlamalı."))
+    db.q("INSERT INTO project_assets(project_id,label,kind,payload) VALUES(?,?,?,?)", (pid, lb[:80], "code" if tur.lower() == "kod" else "link", pl[:400000])); await ctx.send(view=note("ok", "İÇERİK EKLENDİ", "`" + lb[:80] + "`"))
+@proje.command(name="varlık-sil", aliases=["varlik-sil"], help="<varlık-id>")
+@is_owner()
+async def p_asset_del(ctx, aid: int):
+    db.q("DELETE FROM project_assets WHERE id=?", (aid,)); await ctx.send(view=note("ok", "İÇERİK SİLİNDİ", "`#" + str(aid) + "`"))
+@proje.command(name="varlık-liste", aliases=["varlik-liste"], help="<id>")
+@is_owner()
+async def p_asset_list(ctx, pid: int):
+    a = db.all("SELECT id,label,kind FROM project_assets WHERE project_id=?", (pid,))
+    await ctx.send(view=v2card("📦 İçerikler", "\n".join(KIND_EMO.get(x["kind"], "•") + " `#" + str(x["id"]) + "` " + x["label"] for x in a) or "İçerik yok."))
+
+@proje.command(name="sil", help="<id>")
+@is_owner()
+async def p_sil(ctx, pid: int):
+    p = db.one("SELECT * FROM projects WHERE id=?", (pid,))
+    if not p: return await ctx.send(view=note("er", "PROJE YOK", "Bu ID ile proje bulunamadı."))
+    t = head("warn", "PROJE SİLME ONAYI") + "\n\n**" + p["name"] + "** ve tüm içerikleri silinecek."; v = ConfirmPanel(t); await rp(ctx, t, v); await v.wait()
+    if not v.value: return
+    for tb in ("project_assets", "project_likes", "project_changelog", "project_dl_log"): db.q("DELETE FROM " + tb + " WHERE project_id=?", (pid,))
+    db.q("DELETE FROM projects WHERE id=?", (pid,))
+    try:
+        ch = bot.get_channel(p["channel_id"]); m = await ch.fetch_message(p["message_id"]); await m.delete()
+    except Exception: pass
+    await ctx.send(view=note("ok", "PROJE SİLİNDİ", "**" + p["name"] + "** kaldırıldı."))
+
+@proje.command(name="liste", help="Tüm projeler (gizliler dahil)")
+@is_owner()
+async def p_liste(ctx):
+    rs = db.all("SELECT * FROM projects ORDER BY id DESC LIMIT 25")
+    await ctx.send(view=v2card("📋 Projeler", "\n".join(("🙈 " if r["status"] != "published" else "") + (r["emoji"] or "💎") + " `#" + str(r["id"]) + "` **" + r["name"] + "** v" + str(r["version"]) + " · 📥 " + str(r["downloads"]) for r in rs) or "Proje yok."))
+
+@proje.command(name="yenile", aliases=["yeniden-yayınla"], help="<id> [#kanal] — silinmiş paylaşımı yeniden gönderir")
+@is_owner()
+async def p_yenile(ctx, pid: int, kanal: discord.TextChannel = None):
+    if not db.one("SELECT 1 FROM projects WHERE id=?", (pid,)): return await ctx.send(view=note("er", "PROJE YOK", "Bu ID ile proje bulunamadı."))
+    m = await post_project(pid, kanal or ctx.channel); await ctx.send(view=note("ok", "YENİDEN YAYINLANDI", m.jump_url))
+
+@proje.command(name="kanal", help="<#kanal> — varsayılan proje kanalı")
+@is_owner()
+async def p_kanal(ctx, kanal: discord.TextChannel):
+    db.q("INSERT OR REPLACE INTO project_share_settings(id,channel_id) VALUES(1,?)", (kanal.id,)); await ctx.send(view=note("ok", "PROJE KANALI", kanal.mention))
+@proje.command(name="depo", help="<#özel-kanal> — dosya depolama kanalı (herkese kapalı olmalı)")
+@is_owner()
+async def p_depo(ctx, kanal: discord.TextChannel):
+    db.q("INSERT OR REPLACE INTO bot_meta(key,value) VALUES('proj_depo',?)", (str(kanal.id),)); await ctx.send(view=note("ok", "DEPO KANALI AYARLANDI", kanal.mention + "\nYüklenen dosyalar burada saklanır; silme!"))
+
+@proje.command(name="istatistik", aliases=["stats"], help="Proje istatistikleri")
+@is_owner()
+async def p_stats(ctx):
+    t = db.one("SELECT COUNT(*) n, COALESCE(SUM(downloads),0) d, COALESCE(SUM(likes),0) l, COALESCE(SUM(views),0) v FROM projects")
+    wk = db.one("SELECT COUNT(*) n FROM project_dl_log WHERE ts>=?", ((datetime.datetime.now() - datetime.timedelta(days=7)).isoformat(),))["n"]
+    top = db.all("SELECT name, downloads FROM projects ORDER BY downloads DESC LIMIT 5")
+    await ctx.send(view=v2card("📊 KTMR Projects İstatistikleri", "**Proje:** `" + str(t["n"]) + "` • **İndirme:** `" + str(t["d"]) + "` • **Beğeni:** `" + str(t["l"]) + "` • **Görüntülenme:** `" + str(t["v"]) + "`\n**Son 7 gün indirme:** `" + str(wk) + "`\n\n**Zirvedekiler**\n" + ("\n".join(medal(i) + " " + x["name"] + " — `" + str(x["downloads"]) + "`" for i, x in enumerate(top)) or "—")))
+
+# ═══════════════════════════════════════════════════════════════════
+# 💡 ÖNERİ SİSTEMİ
+# ═══════════════════════════════════════════════════════════════════
+SUG_COLOR = {"open": 0x5865F2, "accepted": 0x57F287, "rejected": 0xED4245, "thinking": 0xFEE75C}
+SUG_TEXT = {"open": "🗳️ Oylamada", "accepted": "✅ Kabul edildi", "rejected": "❌ Reddedildi", "thinking": "🤔 Değerlendiriliyor"}
+def sug_view(sg):
+    body = sg["text"][:1800] + "\n\n**Durum:** " + SUG_TEXT[sg["status"]] + ("\n**Yetkili notu:** " + sg["staff_note"][:300] if sg["staff_note"] else "")
+    rows = (_row(mkbtn(str(sg["up"]), sug_up, discord.ButtonStyle.success, "👍", "ksug:up"), mkbtn(str(sg["down"]), sug_down, discord.ButtonStyle.danger, "👎", "ksug:down")),) if sg["status"] == "open" else ()
+    return v2card("💡 Öneri #" + str(sg["id"]), body + "\n\n-# Öneren: <@" + str(sg["user_id"]) + ">", rows, color=SUG_COLOR[sg["status"]])
+async def _sug_vote(it, v):
+    sg = db.one("SELECT * FROM suggestions WHERE message_id=?", (it.message.id,))
+    if not sg or sg["status"] != "open": return await esend(it, note("er", "OYLAMA KAPALI", "Bu öneri artık oylanamaz."))
+    cur = db.one("SELECT vote FROM suggestion_votes WHERE sid=? AND user_id=?", (sg["id"], it.user.id))
+    if cur and cur["vote"] == v: db.q("DELETE FROM suggestion_votes WHERE sid=? AND user_id=?", (sg["id"], it.user.id))
+    else: db.q("INSERT OR REPLACE INTO suggestion_votes(sid,user_id,vote) VALUES(?,?,?)", (sg["id"], it.user.id, v))
+    db.q("UPDATE suggestions SET up=(SELECT COUNT(*) FROM suggestion_votes WHERE sid=? AND vote=1), down=(SELECT COUNT(*) FROM suggestion_votes WHERE sid=? AND vote=-1) WHERE id=?", (sg["id"], sg["id"], sg["id"]))
+    await it.response.edit_message(view=sug_view(db.one("SELECT * FROM suggestions WHERE id=?", (sg["id"],))))
+async def sug_up(it): await _sug_vote(it, 1)
+async def sug_down(it): await _sug_vote(it, -1)
+
+@kategori("genel")
+@bot.command(name="fikir", aliases=["suggest", "öneriyap"], help="<metin> — sunucuya öneri gönder")
+@commands.guild_only()
+@commands.cooldown(1, 60, commands.BucketType.user)
+async def fikir(ctx, *, metin: str):
+    r = db.one("SELECT value FROM bot_meta WHERE key=?", ("sug_ch_" + str(ctx.guild.id),)); ch = ctx.guild.get_channel(int(r["value"])) if r else None
+    if not ch: return await ctx.send(view=note("er", "ÖNERİ KANALI YOK", "Yönetici `k!fikirkanal #kanal` ile ayarlamalı."))
+    cur = db.q("INSERT INTO suggestions(guild_id,user_id,text,created_at) VALUES(?,?,?,?)", (ctx.guild.id, ctx.author.id, metin[:1800], _now()))
+    sg = db.one("SELECT * FROM suggestions WHERE id=?", (cur.lastrowid,)); m = await ch.send(view=sug_view(sg))
+    db.q("UPDATE suggestions SET channel_id=?, message_id=? WHERE id=?", (ch.id, m.id, sg["id"]))
+    await ctx.send(view=note("ok", "ÖNERİN İLETİLDİ", "Öneri #" + str(sg["id"]) + " → " + m.jump_url))
+@kategori("mod")
+@bot.command(name="fikirkanal", help="<#kanal> — öneri kanalını ayarla")
+@commands.has_permissions(administrator=True)
+async def fikirkanal(ctx, kanal: discord.TextChannel):
+    db.q("INSERT OR REPLACE INTO bot_meta(key,value) VALUES(?,?)", ("sug_ch_" + str(ctx.guild.id), str(kanal.id))); await ctx.send(view=note("ok", "ÖNERİ KANALI AYARLANDI", kanal.mention))
+@kategori("mod")
+@bot.command(name="fikirkarar", help="<id> <kabul|red|düşünülüyor> [not]")
+@commands.has_permissions(manage_guild=True)
+async def fikirkarar(ctx, sid: int, karar: str, *, notu: str = ""):
+    st = {"kabul": "accepted", "red": "rejected", "reddet": "rejected", "düşünülüyor": "thinking", "dusunuluyor": "thinking"}.get(karar.lower())
+    sg = db.one("SELECT * FROM suggestions WHERE id=? AND guild_id=?", (sid, ctx.guild.id))
+    if not sg or not st: return await ctx.send(view=note("er", "GEÇERSİZ", "Kullanım: `k!fikirkarar <id> kabul|red|düşünülüyor [not]`"))
+    db.q("UPDATE suggestions SET status=?, staff_note=? WHERE id=?", (st, notu[:300], sid)); sg = db.one("SELECT * FROM suggestions WHERE id=?", (sid,))
+    try:
+        ch = ctx.guild.get_channel(sg["channel_id"]); m = await ch.fetch_message(sg["message_id"]); await m.edit(view=sug_view(sg))
+    except Exception: pass
+    await ctx.send(view=note("ok", "KARAR KAYDEDİLDİ", "Öneri #" + str(sid) + " → " + SUG_TEXT[st]))
+
+# ───────────── Kalıcı view'ları yeniden başlatmada kaydet ─────────────
+_EXT_READY = {"done": False}
+_STUB_ORDER = {"id": 0, "status": "pending", "user_id": 0, "product_id": 0, "product_name": "", "price": 0, "currency": "", "payment": "", "note": "", "coupon": "", "handled_by": 0, "created_at": _now()}
+_STUB_PROJ = {"id": 0, "name": "", "emoji": "💎", "category": "Genel", "description": "", "version": "1", "tags": "", "banner": "", "downloads": 0, "likes": 0, "pro_only": 0}
+_STUB_SUG = {"id": 0, "status": "open", "text": "", "user_id": 0, "up": 0, "down": 0, "staff_note": ""}
+async def _ext_ready():
+    if _EXT_READY["done"]: return
+    _EXT_READY["done"] = True
+    for mk in (lambda: shop_front(None), lambda: order_view(_STUB_ORDER), lambda: project_post(_STUB_PROJ), lambda: sug_view(_STUB_SUG)):
+        try: bot.add_view(mk())
+        except Exception: traceback.print_exc()
+bot.add_listener(_ext_ready, "on_ready")
+
 
 if __name__ == "__main__":
     bot.run(BOT_TOKEN)
