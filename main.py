@@ -3827,34 +3827,43 @@ class ShopSetupModal(Modal, title="Shop Ayarları"):
         await interaction.response.send_message(f"✅ Shop kaydedildi: **{len(services)} hizmet**, **{len(payments)} ödeme yöntemi**, sipariş kanalı {ch.mention}.",ephemeral=True)
 
 class ShopPurchaseModal(Modal, title="Sipariş Oluştur"):
-    payment=TextInput(label="Ödeme yöntemi (ayarlandığı gibi yaz)",max_length=80)
     details=TextInput(label="Sipariş detayları",style=discord.TextStyle.paragraph,required=False,max_length=700,placeholder="Teslimat bilgisi veya kullanıcı adın")
-    def __init__(self,guild_id,service):
-        super().__init__(); self.guild_id=guild_id; self.service=service
-        row=db.one("SELECT payments FROM guild_shops WHERE guild_id=?",(guild_id,)); self.allowed=json.loads(row["payments"] or "[]") if row else []
-        self.payment.placeholder=" / ".join(self.allowed[:4])[:100] or "Ödeme yöntemi"
+    def __init__(self,guild_id,service,payment):
+        super().__init__(); self.guild_id=guild_id; self.service=service; self.payment=payment
     async def on_submit(self,interaction):
-        pay=next((x for x in self.allowed if x.casefold()==self.payment.value.strip().casefold()),None)
-        if not pay: return await interaction.response.send_message("Ödeme yöntemini ayarlardaki adıyla yaz: "+", ".join(self.allowed),ephemeral=True)
-        row=db.one("SELECT * FROM guild_shops WHERE guild_id=?",(self.guild_id,)); ch=interaction.guild.get_channel(int(row["order_channel"])) if row and interaction.guild else None
+        row=db.one("SELECT * FROM guild_shops WHERE guild_id=?",(self.guild_id,))
+        ch=interaction.guild.get_channel(int(row["order_channel"])) if row and interaction.guild else None
         if not isinstance(ch,discord.TextChannel): return await interaction.response.send_message("Sipariş kanalı bulunamadı.",ephemeral=True)
-        # Ödeme yöntemleri tamamen sunucu sahibinin belirlediği manuel yöntemlerdir.
-        # Bot puan/coin tahsil etmez ve harici ödeme doğrulaması yapmaz.
         oid="KT-"+datetime.datetime.now().strftime("%y%m%d%H%M%S")+"-"+str(random.randint(100,999))
-        msg=f"## 🛍️ YENİ SİPARİŞ • {oid}\n**Müşteri:** {interaction.user.mention} (`{interaction.user.id}`)\n**Hizmet:** {self.service['name']}\n**Fiyat:** {self.service['price']}\n**Ödeme:** {pay}\n**Detay:** {self.details.value.strip() or 'Belirtilmedi'}"
+        msg=f"## 🛍️ YENİ SİPARİŞ • {oid}\n**Müşteri:** {interaction.user.mention} (`{interaction.user.id}`)\n**Hizmet:** {self.service['name']}\n**Fiyat:** {self.service['price']}\n**Ödeme:** {self.payment}\n**Detay:** {self.details.value.strip() or 'Belirtilmedi'}\n**Durum:** ⏳ Manuel ödeme kontrolü bekliyor"
         try: await rp_ch(ch,msg)
         except Exception: return await interaction.response.send_message("Sipariş gönderilemedi; bot kanal izinlerini kontrol edin.",ephemeral=True)
-        await interaction.response.send_message(
-            f"✅ Sipariş {ch.mention} kanalına gönderildi. No: `{oid}`\\n"
-            f"Ödeme yöntemi: **{pay}** — ödeme yetkili tarafından manuel kontrol edilir.",
-            ephemeral=True)
+        await interaction.response.send_message(f"✅ Sipariş {ch.mention} kanalına gönderildi. No: `{oid}`\nÖdeme yöntemi: **{self.payment}** — ödeme yetkili tarafından manuel kontrol edilir.",ephemeral=True)
+
+class ShopPaymentView(View):
+    def __init__(self,guild_id,service,payments):
+        super().__init__(timeout=180)
+        self.guild_id=guild_id; self.service=service
+        for payment in payments[:25]:
+            button=discord.ui.Button(label=payment[:80],style=discord.ButtonStyle.secondary,emoji="💳")
+            async def callback(interaction, chosen=payment):
+                await interaction.response.send_modal(ShopPurchaseModal(self.guild_id,self.service,chosen))
+            button.callback=callback
+            self.add_item(button)
 
 class ShopServiceSelect(Select):
     def __init__(self,guild_id,services):
         self.guild_id=guild_id; self.services=services
         opts=[discord.SelectOption(label=x['name'][:100],description=(str(x['price'])+' • '+x.get('description',''))[:100],value=str(i),emoji='🛍️') for i,x in enumerate(services[:25])]
         super().__init__(placeholder="Bir hizmet seç…",min_values=1,max_values=1,options=opts,custom_id="katre_shop_service_v652")
-    async def callback(self,interaction): await interaction.response.send_modal(ShopPurchaseModal(self.guild_id,self.services[int(self.values[0])]))
+    async def callback(self,interaction):
+        service=self.services[int(self.values[0])]
+        row=db.one("SELECT payments FROM guild_shops WHERE guild_id=?",(self.guild_id,))
+        payments=json.loads(row["payments"] or "[]") if row else []
+        if not payments: return await interaction.response.send_message("Bu mağazada ödeme yöntemi ayarlanmamış.",ephemeral=True)
+        body=(f"## 💳 Ödeme Yöntemi Seçin\n**Hizmet:** {service['name']} — `{service['price']}`\n\n"
+              "Sunucu sahibinin belirlediği yöntemlerden birini seç. Ödeme manuel olarak kontrol edilir.")
+        await interaction.response.send_message(body,view=ShopPaymentView(self.guild_id,service,payments),ephemeral=True)
 
 class ShopSettingsPanel(View):
     def __init__(self,guild_id): super().__init__(timeout=180); self.guild_id=guild_id
@@ -3864,7 +3873,7 @@ class ShopSettingsPanel(View):
         await interaction.response.send_modal(ShopSetupModal(self.guild_id))
 
 @kategori("sys")
-@bot.command(name="mağaza",aliases=["magaza","shop"],help="Sunucu sahibinin yapılandırdığı hizmet mağazası")
+@bot.command(name="mağaza",aliases=["magaza","hizmetmagazasi"],help="Sunucu mağazası; ayar, hizmet ve manuel ödeme yöntemleri")
 @commands.guild_only()
 async def magaza(ctx,alt="panel"):
     row=db.one("SELECT * FROM guild_shops WHERE guild_id=?",(ctx.guild.id,))
@@ -3883,4 +3892,4 @@ async def magaza(ctx,alt="panel"):
 
 
 if __name__ == "__main__":
-    bot.run(TOKEN)
+    bot.run(BOT_TOKEN)
