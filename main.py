@@ -3882,4 +3882,4 @@ async def magaza(ctx,alt="panel"):
     await rp(ctx,body,view=ShopServiceSelect(ctx.guild.id,services))
 
 
-if __name__ == "__main
+if __name__ == "__main__"
