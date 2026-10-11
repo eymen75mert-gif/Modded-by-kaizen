@@ -52,7 +52,7 @@ DIV = "────────────────────────�
 PAGE_SIZE = 15
 BOT_VERSION = "6.5.4"
 CHANGELOG = {
-    "6.5.4": ["💎 k!proje için 5 adımlı Components V2 sihirbazı: onay/red, emoji, açıklama, içerik türü ve kanal seçimi."],
+    "6.5.4": ["💎 k!proje için 5 adımlı Components V2 sihirbazı; form/modal yerine sohbet mesajlarıyla veri toplama, içerik türü butonları ve son onay/red."],
     "6.5.3": ["💎 KTMR Projects için bot owner paylaşım kanalı eklendi: dosya/link/kod içerikleri Components V2 kartlarına dönüştürülür.", "🔘 Kod DM teslimi, indirme/link butonları ve kalıcı paylaşım butonları eklendi.", "🛍️ Mağaza komutları dinamik yardım menüsünde görünür; manuel ödeme akışı korunur."],
     "6.5": [
         "📣 Reklam / zorunlu sunucu sistemi eklendi: Owner panelinden tamamen butonlarla açılıp kapatılabilir.",
@@ -3989,10 +3989,8 @@ async def proje_bilgi(ctx):
     await rp(ctx, head("diamond", "KTMR PROJECTS • SİSTEM DURUMU") + f"\n\n**Paylaşım kanalı:** {ch.mention if ch else 'Ayarlanmamış'}\n**Kayıtlı paylaşım:** {count['n'] if count else 0}\n**Kalıcı butonlar:** Aktif\n**Marka:** 💎 KTMR Projects\n\n`k!proje-kanal #kanal` ile kanal belirle.")
 
 # ─────────────── KTMR PROJECTS • ADIMLI PROJE YAYINLAMA V2 ───────────────
-# Wizard state is collected through modals/selects; published posts use persistent custom IDs.
-PROJECT_EMOJI_FALLBACKS = {
-    "code": "💻", "link": "🔗", "file": "📦", "project": "💎", "download": "📥", "description": "📝"
-}
+# Wizard state is collected with ordinary chat messages and buttons (no Discord modals/forms).
+PROJECT_EMOJI_FALLBACKS = {"code": "💻", "link": "🔗", "file": "📦", "project": "💎", "download": "📥", "description": "📝"}
 PROJECT_WIZARDS = {}
 
 def _project_emoji(value, fallback="💎"):
@@ -4008,123 +4006,126 @@ def _project_card(text, rows=()):
         for item in getattr(r, 'children', []): v.add_item(item)
     return v
 
+async def _project_wait_text(channel, owner_id, prompt, progress_message, step, timeout=300):
+    await progress_message.edit(content=f"## 💎 KTMR Projects • Adım {step}/5\n\n{prompt}\n\n-# Yanıtını bu kanala mesaj olarak yaz. 5 dakika içinde yanıt gelmezse işlem iptal edilir.", view=None)
+    def check(m): return m.author.id == owner_id and m.channel.id == channel.id and not m.author.bot
+    try:
+        msg = await bot.wait_for("message", check=check, timeout=timeout)
+    except asyncio.TimeoutError:
+        await progress_message.edit(content="💠 KTMR Projects sihirbazı zaman aşımına uğradı. Yeniden başlatmak için `k!proje` yaz.", view=None)
+        PROJECT_WIZARDS.pop(owner_id, None)
+        return None
+    value = (msg.content or "").strip()
+    try: await msg.delete()
+    except Exception: pass
+    return value
+
 class ProjectWizardStart(View):
-    def __init__(self, owner_id):
-        super().__init__(timeout=300); self.owner_id = owner_id
+    def __init__(self, owner_id): super().__init__(timeout=300); self.owner_id = owner_id
     async def interaction_check(self, interaction):
         if interaction.user.id != self.owner_id:
-            await interaction.response.send_message("Bu proje sihirbazı yalnızca komutu başlatan bot sahibine açıktır.", ephemeral=True); return False
+            await interaction.response.send_message("Bu proje sihirbazı yalnızca bot sahibine açıktır.", ephemeral=True); return False
         return True
     @discord.ui.button(label="Başla", style=discord.ButtonStyle.success, emoji="💎", custom_id="ktmr:wizard_start")
     async def start(self, interaction, button):
-        PROJECT_WIZARDS[interaction.user.id] = {"step": 1, "name": "", "name_emoji": "", "description": "", "kind": "", "payload": "", "detail": "", "detail_emoji": "", "channel_id": None, "origin_guild": interaction.guild_id}
-        await interaction.response.send_modal(ProjectNameModal(interaction.user.id))
+        PROJECT_WIZARDS[self.owner_id] = {"step": 1, "name": "", "name_emoji": "", "description": "", "kind": "", "payload": "", "detail": "", "detail_emoji": "", "channel_id": None, "origin_guild": interaction.guild_id, "channel": interaction.channel}
+        await interaction.response.defer()
+        await interaction.message.edit(content="## 💎 KTMR Projects • Adım 1/5\n\nSihirbaz başlatıldı; yanıtlarını bu kanala yaz. Yanıt mesajların mümkünse otomatik silinir.", view=None)
+        await run_project_text_steps(self.owner_id, interaction.channel, interaction.message)
     @discord.ui.button(label="İptal", style=discord.ButtonStyle.danger, emoji="❌", custom_id="ktmr:wizard_cancel_start")
     async def cancel(self, interaction, button):
         PROJECT_WIZARDS.pop(interaction.user.id, None)
         await interaction.response.edit_message(content="💠 KTMR Projects proje oluşturma işlemi iptal edildi.", embed=None, view=None)
 
-class ProjectNameModal(Modal, title="Adım 1/5 • Kod / Bot adı"):
-    project_name = TextInput(label="Kod / Bot / Proje adı", placeholder="Örn. Katre Ticket Bot", max_length=90)
-    name_emoji = TextInput(label="Başlık emojisi (isteğe bağlı)", placeholder="💎 veya sunucudaki özel emoji kodu", required=False, max_length=80)
-    def __init__(self, owner_id): super().__init__(); self.owner_id=owner_id
-    async def on_submit(self, interaction):
-        st=PROJECT_WIZARDS.get(self.owner_id)
-        if not st: return await interaction.response.send_message("Oturum süresi doldu. `k!proje` ile yeniden başlat.", ephemeral=True)
-        st["name"]=str(self.project_name).strip(); st["name_emoji"]=_project_emoji(str(self.name_emoji), PROJECT_EMOJI_FALLBACKS['project']); st["step"]=2
-        await interaction.response.send_modal(ProjectDescriptionModal(self.owner_id))
-
-class ProjectDescriptionModal(Modal, title="Adım 2/5 • Açıklama"):
-    description = TextInput(label="Kullanıcıya gösterilecek açıklama", style=discord.TextStyle.paragraph, placeholder="Özellikler, kurulum, kullanım ve gereksinimler...", max_length=1800)
-    def __init__(self, owner_id): super().__init__(); self.owner_id=owner_id
-    async def on_submit(self, interaction):
-        st=PROJECT_WIZARDS.get(self.owner_id)
-        if not st: return await interaction.response.send_message("Oturum süresi doldu. `k!proje` ile yeniden başlat.", ephemeral=True)
-        st['description']=str(self.description).strip(); st['step']=3
-        view=ProjectKindView(self.owner_id)
-        await interaction.response.send_message(f"💠 **KTMR Projects • Adım 3/5**\nAdım 2 tamamlandı. **{st['name']}** için içerik türünü seç:", view=view, ephemeral=True)
+async def run_project_text_steps(owner_id, channel, progress):
+    st = PROJECT_WIZARDS.get(owner_id)
+    if not st: return
+    name = await _project_wait_text(channel, owner_id, "**Kod / Bot adı**\nProje adını yaz (ör. Katre Ticket Bot).", progress, 1)
+    if name is None: return
+    if not name: return await progress.edit(content="Proje adı boş olamaz. `k!proje` ile yeniden başlat.", view=None)
+    st["name"] = name[:90]
+    emoji = await _project_wait_text(channel, owner_id, "**Başlık emojisi (isteğe bağlı)**\nBir emoji yaz veya `-` yazarak varsayılanı kullan.", progress, 1)
+    if emoji is None: return
+    st["name_emoji"] = _project_emoji("" if emoji == "-" else emoji, PROJECT_EMOJI_FALLBACKS['project'])
+    description = await _project_wait_text(channel, owner_id, "**Açıklama**\nÖzellikleri, kurulum ve kullanım bilgilerini yaz. Sunucu emojileri kullanabilirsin.", progress, 2)
+    if description is None: return
+    st["description"] = description[:1800] or "Açıklama belirtilmedi."
+    st["step"] = 3
+    await progress.edit(content=f"## 💎 KTMR Projects • Adım 3/5\n\n**{st['name']}** için içerik türünü seç:", view=ProjectKindView(owner_id))
 
 class ProjectKindView(View):
-    def __init__(self, owner_id): super().__init__(timeout=300); self.owner_id=owner_id
+    def __init__(self, owner_id): super().__init__(timeout=300); self.owner_id = owner_id
     async def interaction_check(self, interaction):
-        if interaction.user.id!=self.owner_id:
-            await interaction.response.send_message("Bu sihirbaz yalnızca bot sahibine açıktır.",ephemeral=True); return False
+        if interaction.user.id != self.owner_id:
+            await interaction.response.send_message("Bu sihirbaz yalnızca bot sahibine açıktır.", ephemeral=True); return False
         return True
     @discord.ui.button(label="Kod", emoji="💻", style=discord.ButtonStyle.primary, custom_id="ktmr:wizard_kind_code")
-    async def code(self, interaction, button):
-        st=PROJECT_WIZARDS.get(self.owner_id)
-        if not st: return await interaction.response.send_message("Oturum bulunamadı.",ephemeral=True)
-        st['kind']='code'; await interaction.response.send_modal(ProjectPayloadModal(self.owner_id, 'code'))
+    async def code(self, interaction, button): await self.choose(interaction, "code")
     @discord.ui.button(label="Link", emoji="🔗", style=discord.ButtonStyle.primary, custom_id="ktmr:wizard_kind_link")
-    async def link(self, interaction, button):
-        st=PROJECT_WIZARDS.get(self.owner_id)
-        if not st: return await interaction.response.send_message("Oturum bulunamadı.",ephemeral=True)
-        st['kind']='link'; await interaction.response.send_modal(ProjectPayloadModal(self.owner_id, 'link'))
+    async def link(self, interaction, button): await self.choose(interaction, "link")
     @discord.ui.button(label="Dosya URL'si", emoji="📦", style=discord.ButtonStyle.primary, custom_id="ktmr:wizard_kind_file")
-    async def file(self, interaction, button):
-        st=PROJECT_WIZARDS.get(self.owner_id)
-        if not st: return await interaction.response.send_message("Oturum bulunamadı.",ephemeral=True)
-        st['kind']='file'; await interaction.response.send_modal(ProjectPayloadModal(self.owner_id, 'file'))
+    async def file(self, interaction, button): await self.choose(interaction, "file")
+    async def choose(self, interaction, kind):
+        st = PROJECT_WIZARDS.get(self.owner_id)
+        if not st: return await interaction.response.send_message("Oturum bulunamadı; `k!proje` ile yeniden başlat.", ephemeral=True)
+        st['kind'] = kind
+        await interaction.response.defer()
+        await interaction.message.edit(content=f"## 💎 KTMR Projects • Adım 3/5\n\n**{kind.upper()}** seçildi. İçeriği aşağıdaki gibi gönder:", view=None)
+        await run_project_payload_steps(self.owner_id, interaction.channel, interaction.message)
 
-class ProjectPayloadModal(Modal):
-    payload_input = TextInput(label="Kod / doğrudan link / dosya URL'si", style=discord.TextStyle.paragraph, placeholder="Kodun tamamı veya https://... bağlantısı", max_length=3900)
-    detail_input = TextInput(label="Sürüm / kurulum / ek detay (isteğe bağlı)", style=discord.TextStyle.paragraph, required=False, placeholder="Python 3.12 • discord.py 2.6 • kurulum adımları...", max_length=900)
-    def __init__(self, owner_id, kind):
-        super().__init__(title={"code":"Adım 3/5 • Kod gir", "link":"Adım 3/5 • Link gir", "file":"Adım 3/5 • Dosya bağlantısı gir"}[kind]); self.owner_id=owner_id; self.kind=kind
-    async def on_submit(self, interaction):
-        st=PROJECT_WIZARDS.get(self.owner_id)
-        if not st: return await interaction.response.send_message("Oturum süresi doldu. `k!proje` ile yeniden başlat.",ephemeral=True)
-        payload=str(self.payload_input).strip()
-        if not payload: return await interaction.response.send_message("İçerik boş olamaz.",ephemeral=True)
-        if self.kind in ('link','file') and not re.match(r'^https?://\S+$',payload):
-            return await interaction.response.send_message("Geçerli, doğrudan `https://` veya `http://` bağlantısı gir.",ephemeral=True)
-        st['kind']=self.kind; st['payload']=payload; st['detail']=str(self.detail_input).strip(); st['step']=4
-        await interaction.response.send_modal(ProjectEmojiModal(self.owner_id))
-
-class ProjectEmojiModal(Modal, title="Adım 4/5 • Emoji (isteğe bağlı)"):
-    detail_emoji = TextInput(label="Açıklama / buton emojisi", placeholder="Örn. <:kod:123456789012345678> veya 💻", required=False, max_length=80)
-    def __init__(self, owner_id): super().__init__(); self.owner_id=owner_id
-    async def on_submit(self, interaction):
-        st=PROJECT_WIZARDS.get(self.owner_id)
-        if not st: return await interaction.response.send_message("Oturum süresi doldu.",ephemeral=True)
-        st['detail_emoji']=_project_emoji(str(self.detail_emoji), PROJECT_EMOJI_FALLBACKS.get(st['kind'],'💠')); st['step']=5
-        options=[]
-        if interaction.guild:
-            for ch in interaction.guild.text_channels[:25]: options.append(discord.SelectOption(label=f"#{ch.name}"[:100], value=str(ch.id), description=f"ID: {ch.id}"))
-        if not options: return await interaction.response.send_message("Kanal seçimi için sunucuda `k!proje` komutunu kullanmalısın.",ephemeral=True)
-        view=ProjectChannelView(self.owner_id, options)
-        await interaction.response.send_message(f"💠 **KTMR Projects • Adım 5/5**\nAdım 4 tamamlandı. **{st['name']}** için yayın kanalını seç:", view=view, ephemeral=True)
+async def run_project_payload_steps(owner_id, channel, progress):
+    st = PROJECT_WIZARDS.get(owner_id)
+    if not st: return
+    kind = st['kind']
+    prompt = {"code":"Kodun tamamını bu kanala gönder.", "link":"Tam bağlantıyı `https://...` biçiminde gönder.", "file":"Dosyanın doğrudan indirme bağlantısını gönder."}[kind]
+    payload = await _project_wait_text(channel, owner_id, prompt, progress, 3)
+    if payload is None: return
+    if not payload: return await progress.edit(content="İçerik boş olamaz. `k!proje` ile yeniden başlat.", view=None)
+    if kind in ('link','file') and not re.match(r'^https?://\S+$', payload):
+        await progress.edit(content="Geçerli bir `https://` veya `http://` bağlantısı girilmedi. `k!proje` ile yeniden başlat.", view=None); PROJECT_WIZARDS.pop(owner_id,None); return
+    st['payload'] = payload
+    detail = await _project_wait_text(channel, owner_id, "**Ek detay (isteğe bağlı)**\nKurulum, sürüm veya gereksinim bilgisi yaz; atlamak için `-` gönder.", progress, 4)
+    if detail is None: return
+    st['detail'] = '' if detail == '-' else detail[:900]
+    emoji = await _project_wait_text(channel, owner_id, "**Açıklama / buton emojisi (isteğe bağlı)**\nEmoji yaz veya varsayılan için `-` gönder.", progress, 4)
+    if emoji is None: return
+    st['detail_emoji'] = _project_emoji('' if emoji == '-' else emoji, PROJECT_EMOJI_FALLBACKS.get(kind,'💠'))
+    st['step'] = 5
+    guild = bot.get_guild(st['origin_guild'])
+    options = [discord.SelectOption(label=f"#{ch.name}"[:100], value=str(ch.id), description=f"ID: {ch.id}") for ch in (guild.text_channels[:25] if guild else [])]
+    if not options:
+        await progress.edit(content="Kanal listesi alınamadı. Botun sunucuda olduğundan emin ol ve `k!proje` ile yeniden dene.", view=None); PROJECT_WIZARDS.pop(owner_id,None); return
+    await progress.edit(content="## 💎 KTMR Projects • Adım 5/5\n\nYayınlanacak kanalı seç. Ardından son onay ekranı açılacak.", view=ProjectChannelView(owner_id, options))
 
 class ProjectChannelView(View):
     def __init__(self, owner_id, options):
         super().__init__(timeout=300); self.owner_id=owner_id
-        self.select=Select(placeholder="Paylaşım kanalını seç", min_values=1,max_values=1,options=options,custom_id="ktmr:wizard_channel")
+        self.select=Select(placeholder="Paylaşım kanalını seç", min_values=1, max_values=1, options=options, custom_id="ktmr:wizard_channel")
         self.select.callback=self.choose; self.add_item(self.select)
     async def interaction_check(self, interaction):
-        if interaction.user.id!=self.owner_id:
-            await interaction.response.send_message("Bu sihirbaz yalnızca bot sahibine açıktır.",ephemeral=True); return False
+        if interaction.user.id != self.owner_id:
+            await interaction.response.send_message("Bu sihirbaz yalnızca bot sahibine açıktır.", ephemeral=True); return False
         return True
     async def choose(self, interaction):
         st=PROJECT_WIZARDS.get(self.owner_id)
-        if not st: return await interaction.response.send_message("Oturum bulunamadı.",ephemeral=True)
+        if not st: return await interaction.response.send_message("Oturum bulunamadı; `k!proje` ile tekrar başlat.", ephemeral=True)
         st['channel_id']=int(self.select.values[0]); st['step']=5
-        ch=interaction.guild.get_channel(st['channel_id']) if interaction.guild else None
-        view=ProjectFinalConfirmView(self.owner_id)
-        body=(f"## 💠 KTMR Projects • Son Onay\n\n**Adım 5/5 tamamlandı.**\n\n**Proje adı:** {st['name_emoji']} {st['name']}\n**Açıklama:**\n{st['description'][:800]}\n\n**Tür:** {st['kind'].upper()}\n**Detay:** {st['detail'] or 'Belirtilmedi'}\n**Emoji:** {st['detail_emoji']}\n**Kanal:** {ch.mention if ch else st['channel_id']}\n\nYayınlamak için **Onayla**, vazgeçmek için **Reddet** butonuna bas.")
-        await interaction.response.edit_message(content=body, embed=None, view=view)
+        ch=interaction.guild.get_channel(st['channel_id']) if interaction.guild else bot.get_channel(st['channel_id'])
+        body=(f"## 💠 KTMR Projects • Son Onay\n\n**Adım 5/5 tamamlandı.**\n\n**Proje adı:** {st['name_emoji']} {st['name']}\n**Açıklama:**\n{st['description'][:800]}\n\n**Tür:** {st['kind'].upper()}\n**Detay:** {st['detail'] or 'Belirtilmedi'}\n**Emoji:** {st['detail_emoji']}\n**Kanal:** {ch.mention if ch else st['channel_id']}\n\nYayınlamak için **Onayla**, vazgeçmek için **Reddet**.")
+        await interaction.response.edit_message(content=body, view=ProjectFinalConfirmView(self.owner_id))
 
 class ProjectFinalConfirmView(View):
     def __init__(self, owner_id): super().__init__(timeout=300); self.owner_id=owner_id
     async def interaction_check(self, interaction):
-        if interaction.user.id!=self.owner_id:
-            await interaction.response.send_message("Bu işlem yalnızca bot sahibine açıktır.",ephemeral=True); return False
+        if interaction.user.id != self.owner_id:
+            await interaction.response.send_message("Bu işlem yalnızca bot sahibine açıktır.", ephemeral=True); return False
         return True
     @discord.ui.button(label="Onayla ve Yayınla", style=discord.ButtonStyle.success, emoji="💎", custom_id="ktmr:wizard_publish")
     async def publish(self, interaction, button):
         st=PROJECT_WIZARDS.get(self.owner_id)
-        if not st: return await interaction.response.send_message("Oturum bulunamadı; `k!proje` ile tekrar başlat.",ephemeral=True)
+        if not st: return await interaction.response.send_message("Oturum bulunamadı; `k!proje` ile tekrar başlat.", ephemeral=True)
         channel=bot.get_channel(st['channel_id'])
-        if not channel: return await interaction.response.send_message("Kanal bulunamadı. Sihirbazı tekrar başlatıp geçerli kanal seç.",ephemeral=True)
+        if not channel: return await interaction.response.send_message("Kanal bulunamadı. Sihirbazı tekrar başlat.", ephemeral=True)
         kind=st['kind']; payload=st['payload']; emoji=st['detail_emoji'] or PROJECT_EMOJI_FALLBACKS.get(kind,'💠')
         title=f"{st['name_emoji']} {st['name']}".strip()
         detail=f"\n\n### {emoji} Kurulum / Ek Bilgi\n{st['detail']}" if st['detail'] else ""
@@ -4136,19 +4137,19 @@ class ProjectFinalConfirmView(View):
         rows.append(mkbtn("Proje Detayı",style=discord.ButtonStyle.secondary,emoji="💠",cid="ktmr:open"))
         try:
             post_view=card_view(desc, rows=(_row(*rows),), accent=0x5865F2, footer=False) if HAS_V2 else ProjectShareView()
-            sent=await channel.send(view=post_view) if HAS_V2 else await channel.send(desc,view=ProjectShareView())
-            db.q("INSERT OR REPLACE INTO project_share_posts(message_id,guild_id,channel_id,kind,payload,title,description,created_at) VALUES(?,?,?,?,?,?,?,?)",(sent.id,channel.guild.id,channel.id,kind,payload,title,st['description']+detail,datetime.datetime.now().isoformat()))
-            if kind=='code':
-                try: bot.add_view(ProjectShareView(),message_id=sent.id)
-                except Exception: pass
-            PROJECT_WIZARDS.pop(self.owner_id,None)
-            await interaction.response.edit_message(content=f"💎 **KTMR Projects • Yayınlandı**\n**{title}** başarıyla {channel.mention} kanalına gönderildi. Kalıcı butonlar kayıt edildi.", embed=None, view=None)
+            sent=await channel.send(view=post_view) if HAS_V2 else await channel.send(desc, view=ProjectShareView())
+            db.q("INSERT OR REPLACE INTO project_share_posts(message_id,guild_id,channel_id,kind,payload,title,description,created_at) VALUES(?,?,?,?,?,?,?,?)", (sent.id, channel.guild.id, channel.id, kind, payload, title, st['description']+detail, datetime.datetime.now().isoformat()))
+            try: bot.add_view(ProjectShareView(), message_id=sent.id)
+            except Exception: pass
+            PROJECT_WIZARDS.pop(self.owner_id, None)
+            await interaction.response.edit_message(content=f"💎 **KTMR Projects • Yayınlandı**\n**{title}** başarıyla {channel.mention} kanalına gönderildi.", view=None)
         except Exception as ex:
-            traceback.print_exc(); await interaction.response.send_message(f"Yayınlama başarısız: `{type(ex).__name__}`. Botun kanala mesaj gönderme ve Components V2 izinlerini kontrol et.",ephemeral=True)
+            traceback.print_exc(); await interaction.response.send_message(f"Yayınlama başarısız: `{type(ex).__name__}`. Kanal izinlerini kontrol et.", ephemeral=True)
     @discord.ui.button(label="Reddet", style=discord.ButtonStyle.danger, emoji="❌", custom_id="ktmr:wizard_reject")
     async def reject(self, interaction, button):
-        PROJECT_WIZARDS.pop(self.owner_id,None)
-        await interaction.response.edit_message(content="💠 KTMR Projects proje paylaşımı reddedildi ve taslak silindi.", embed=None, view=None)
+        PROJECT_WIZARDS.pop(self.owner_id, None)
+        await interaction.response.edit_message(content="💠 KTMR Projects paylaşımı reddedildi ve taslak silindi.", view=None)
+
 
 @kategori("owner")
 @bot.command(name="proje", aliases=["ktmrproje"], help="KTMR Projects için 5 adımlı V2 proje paylaşım sihirbazı (yalnızca bot sahibi)")
@@ -4156,7 +4157,7 @@ async def proje(ctx):
     if ctx.author.id != OWNER_ID:
         return await rp(ctx, ER("BOT OWNER GEREKLİ", "`k!proje` komutunu yalnızca bot sahibi kullanabilir."))
     body=("## 💎 KTMR Projects • Yeni Proje\n\n" 
-          "5 adımlı proje paylaşım sihirbazına hoş geldin.\n\n"
+          "5 adımlı proje paylaşım sihirbazına hoş geldin. Form/modal kullanılmaz; her adımda sohbet mesajıyla yanıt verirsin.\n\n"
           "1. 💻 Kod / Bot adı ve isteğe bağlı emoji\n"
           "2. 📝 Açıklama (Nitro emojileri desteklenir)\n"
           "3. 💻 Kod, 🔗 link veya 📦 dosya bağlantısı\n"
