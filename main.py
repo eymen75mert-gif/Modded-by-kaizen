@@ -4836,7 +4836,7 @@ async def post_project(pid, channel):
     db.q("UPDATE projects SET channel_id=?, message_id=?, guild_id=? WHERE id=?", (channel.id, m.id, channel.guild.id, pid)); return m
 
 @proje.command(name="yeni", aliases=["ekle", "oluştur"], help="Adım adım proje sihirbazı (sadece bot sahibi)")
-@is_owner()
+@is_half()
 async def p_yeni(ctx):
     if not V2_OK: return await rp(ctx, ER("V2 GEREKLİ", "discord.py>=2.6 gerekli."))
     key = (ctx.channel.id, ctx.author.id); WIZ_ACTIVE.add(key); T = 10
