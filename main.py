@@ -5045,6 +5045,346 @@ async def _ext_ready():
         except Exception: traceback.print_exc()
 bot.add_listener(_ext_ready, "on_ready")
 
+# ═══════════════════════════════════════════════════════════════════
+#  💧 KATRE BOT v7.1 — KALICILIK & GÜZELLEŞTİRME MODÜLÜ
+#
+#  KURULUM: Bu dosyanın TAMAMINI, ana dosyanda v7.0 bloğunun bittiği yerde
+#           (yani şu satırın HEMEN ÜSTÜNE) yapıştır:
+#               if __name__ == "__main__":
+#  Başka hiçbir satırı değiştirmen gerekmez. Bu blok önceki tanımların
+#  üzerine yazar (v7.0 bloğunun mağaza/proje için yaptığı yöntemle aynı).
+#
+#  GEREKEN ORTAM DEĞİŞKENİ: BACKUP_CHANNEL_ID  (botun yazabildiği ÖZEL bir kanal)
+#  ÖNERİLEN: DB_PATH=/data/katre.db  (hosting'de kalıcı disk/volume kullanıyorsan)
+# ═══════════════════════════════════════════════════════════════════
+import gzip, hashlib
+
+BOT_VERSION = "7.1.0"
+CHANGELOG["7.1.0"] = [
+    "💾 Kalıcılık: mağaza (ürün, stok, kupon, kullanım sayısı, kalan gün, ayarlar, siparişler), projeler (açıklama, içerik, sürüm notları, beğeni, indirme), öneriler ve tüm ayarlar artık bot yeniden başlasa da korunur.",
+    "☁️ Bulut yedeği: veriler sıkıştırılıp yedek kanalına dosya olarak yazılır; değişiklik 30 sn içinde yedeklenir, bot açılırken veritabanı boşsa otomatik geri yüklenir.",
+    "🛡️ Bot kapanırken ve `k!restart` öncesinde son bir yedek alınır.",
+    "🎨 Tüm cevap kartları yenilendi: ▰▱ ilerleme çubukları, isteyen kişi bilgisi ve temiz alt bilgi.",
+    "🛍️ Mağaza vitrini: ürün/kategori/teslimat özeti ve düşük stok uyarısı.",
+    "🧪 Yeni `k!kalıcılık` (owner) raporu ve `k!yedek` komutuna `veri` / `kullanıcı` hedefleri.",
+]
+VERSION_TAGLINE["7.1.0"] = "Kalıcı veri • bulut yedeği • yenilenen kart tasarımı"
+
+# ═══════════════════════════════════════════════════════════════════
+# 💾 KALICILIK MOTORU
+# ═══════════════════════════════════════════════════════════════════
+# <<PERSIST-START>>
+DATA_TABLES = [
+    "shop_settings", "shop_products", "shop_coupons", "shop_orders", "guild_shops",
+    "projects", "project_assets", "project_likes", "project_changelog", "project_dl_log",
+    "project_share_settings", "project_share_posts",
+    "suggestions", "suggestion_votes",
+    "role_menus", "reaction_roles", "ticket_settings", "app_settings", "required_guild", "owner_settings",
+    "bot_meta", "log_channels", "guild_logs", "wordgame", "tempvoice", "polls", "giveaways",
+    "blacklist", "auto_replies", "badwords", "counters", "level_roles", "protections", "punish_config",
+    "servers", "half_owners", "emojis",
+]
+USER_TABLES = ["users", "marriages", "punishments", "tickets", "applications", "ai_usage", "afk", "pro_logs"]
+DATA_PROBES = ("shop_products", "shop_settings", "shop_coupons", "shop_orders", "projects", "suggestions", "role_menus", "servers")
+
+_BK_LOCK = asyncio.Lock()
+_DIG = {"data": None, "user": None}
+_LAST = {"data": 0.0, "user": 0.0}
+
+def _has_rows(t):
+    try: return db.one("SELECT 1 AS x FROM " + t + " LIMIT 1") is not None
+    except Exception: return False
+
+def snap_tables(tables):
+    out = {}
+    for t in tables:
+        try: out[t] = db.all("SELECT * FROM " + t)
+        except Exception: out[t] = []
+    return out
+
+def _digest(obj):
+    return hashlib.md5(json.dumps(obj, sort_keys=True, default=str, separators=(",", ":")).encode("utf-8")).hexdigest()
+
+def restore_tables(data, tables, probes=(), force=False):
+    """Yedekten tabloları geri yükler.
+    - force=True  → yedekteki her satır yazılır (elle `k!yedek yükle`).
+    - force=False → yalnızca veritabanı 'taze' (probe tabloları boş) ya da ilgili tablo boşsa yazılır;
+                    böylece sağlam bir veritabanı eski bir yedekle ASLA ezilmez."""
+    allowed = set(tables); total = 0
+    fresh = force or (bool(probes) and not any(_has_rows(t) for t in probes))
+    for t, rows in (data or {}).items():
+        if t not in allowed or not rows: continue
+        try:
+            if not (fresh or not _has_rows(t)): continue
+            cols = {r["name"] for r in db.all("PRAGMA table_info(" + t + ")")}
+            for r in rows:
+                r2 = {k: v for k, v in r.items() if k in cols}
+                if not r2: continue
+                db.q("INSERT OR REPLACE INTO " + t + " (" + ", ".join(r2.keys()) + ") VALUES (" + ", ".join("?" * len(r2)) + ")", tuple(r2.values()))
+                total += 1
+        except Exception:
+            traceback.print_exc()
+    return total
+
+async def _backup_channel(bot):
+    return bot.get_channel(BACKUP_CH) or await bot.fetch_channel(BACKUP_CH)
+
+def _is_mine(bot, m):
+    return bot.user is None or m.author.id == bot.user.id
+
+async def push_file_backup(bot, kind, data):
+    """Veriyi gzip'leyip yedek kanalına DOSYA olarak yazar. Önce yenisi yüklenir, sonra eskisi silinir (veri kaybı olmaz)."""
+    if not BACKUP_CH: return False
+    try:
+        ch = await _backup_channel(bot)
+        raw = gzip.compress(json.dumps(data, separators=(",", ":"), default=str).encode("utf-8"), 6)
+        limit = int(getattr(getattr(ch, "guild", None), "filesize_limit", 8 * 1024 * 1024)) - 8192
+        if len(raw) > limit:
+            print("⚠️ Yedek (" + kind + ") " + str(len(raw) // 1024) + " KB; kanal sınırı " + str(limit // 1024) + " KB'ı aşıyor!"); return False
+        new = await ch.send(MARKER + " " + kind + " file g" + str(int(time.time())), file=discord.File(io.BytesIO(raw), filename="katre_" + kind + ".json.gz"))
+        async for m in ch.history(limit=300):
+            if m.id != new.id and _is_mine(bot, m) and m.content.startswith(MARKER + " " + kind + " file"):
+                try: await m.delete()
+                except Exception: pass
+        return True
+    except Exception:
+        traceback.print_exc(); return False
+
+async def pull_file_backup(bot, kind):
+    if not BACKUP_CH: return None
+    try:
+        ch = await _backup_channel(bot)
+        async for m in ch.history(limit=300):
+            if _is_mine(bot, m) and m.content.startswith(MARKER + " " + kind + " file") and m.attachments:
+                return json.loads(gzip.decompress(await m.attachments[0].read()).decode("utf-8"))
+    except Exception:
+        traceback.print_exc()
+    return None
+
+async def save_all_backups(bot, force=False, final=False):
+    """Değişen veri varsa yedekler. force=True → değişmese de yazar. final=True → kapanış (kullanıcı verisi beklemeden)."""
+    if not BACKUP_CH: return False
+    ok = True
+    async with _BK_LOCK:
+        d = snap_tables(DATA_TABLES); h = _digest(d)
+        if force or h != _DIG["data"]:
+            if await push_file_backup(bot, "kdata", d): _DIG["data"] = h; _LAST["data"] = time.time()
+            else: ok = False
+        if force or final or time.time() - _LAST["user"] >= 600:
+            u = snap_tables(USER_TABLES); h2 = _digest(u)
+            if force or h2 != _DIG["user"]:
+                if await push_file_backup(bot, "kuser", u): _DIG["user"] = h2
+                else: ok = False
+            _LAST["user"] = time.time()
+    return ok
+
+async def cloud_restore(bot):
+    if not BACKUP_CH:
+        print("⚠️ BACKUP_CHANNEL_ID tanımlı değil → bulut yedeği KAPALI. Disk sıfırlanırsa mağaza/proje verileri kaybolur!"); return
+    try:
+        d = await pull_file_backup(bot, "kdata")
+        if d:
+            n = restore_tables(d, DATA_TABLES, DATA_PROBES); _DIG["data"] = _digest(d)
+            print("☁️ veri yedeği kontrol edildi • geri yüklenen satır: " + str(n))
+        else: print("☁️ henüz veri yedeği yok → ilk yedek otomatik alınacak.")
+        u = await pull_file_backup(bot, "kuser")
+        if u:
+            n = restore_tables(u, USER_TABLES); _DIG["user"] = _digest(u)
+            print("☁️ kullanıcı yedeği kontrol edildi • geri yüklenen satır: " + str(n))
+        refresh_emojis()
+    except Exception:
+        traceback.print_exc()
+# <<PERSIST-END>>
+
+try:
+    db.conn.execute("PRAGMA journal_mode=WAL"); db.conn.execute("PRAGMA synchronous=NORMAL")
+except Exception: pass
+
+@tasks.loop(seconds=30)
+async def data_backup_loop():
+    try: await save_all_backups(bot)
+    except Exception: traceback.print_exc()
+@data_backup_loop.before_loop
+async def _before_data_backup(): await bot.wait_until_ready()
+
+_orig_setup_hook = KatreBot.setup_hook
+async def _setup_hook_v71(self):
+    await cloud_restore(self)            # görünümler kaydedilmeden ÖNCE veriyi geri yükle
+    await _orig_setup_hook(self)
+    if not data_backup_loop.is_running(): data_backup_loop.start()
+KatreBot.setup_hook = _setup_hook_v71
+
+_orig_close = KatreBot.close
+async def _close_v71(self):
+    try: await asyncio.wait_for(save_all_backups(self, final=True), 20)
+    except Exception: pass
+    await _orig_close(self)
+KatreBot.close = _close_v71
+
+for _n in ("restart", "yedek"):
+    try: bot.remove_command(_n)
+    except Exception: pass
+
+@kategori("owner")
+@bot.command(name="restart", aliases=["rb"], help="Yeniden başlat (önce yedek alır)")
+@is_owner()
+async def restart(ctx):
+    m = await rp(ctx, WN("YENİDEN BAŞLATILIYOR", "Son yedek alınıyor, ardından bot **birkaç saniye** içinde yeniden başlayacak.\nMağaza, proje ve ayarların korunur."))
+    try: await asyncio.wait_for(save_all_backups(bot, final=True), 20)
+    except Exception: pass
+    await asyncio.sleep(1)
+    try: os.execv(sys.executable, [sys.executable] + sys.argv)
+    except Exception: sys.exit(0)
+
+@kategori("owner")
+@bot.command(name="yedek", help="<durum/kaydet/yükle> [emoji/pro/settings/veri/kullanıcı/hepsi]")
+@is_owner()
+async def yedek(ctx, i: str = "durum", hedef: str = None):
+    if not BACKUP_CH: return await rp(ctx, ER("YEDEK KANALI YOK", "Ortam değişkenlerine `BACKUP_CHANNEL_ID` eklemelisin (botun yazabildiği özel bir kanal)."))
+    i = i.lower()
+    if i == "kaydet":
+        await push_backup(bot, "emoji", EMO_CACHE); await push_backup(bot, "pro", pro_snapshot()); await push_backup(bot, "settings", settings_snapshot())
+        ok = await save_all_backups(bot, force=True)
+        await rp(ctx, OK("YEDEK ALINDI", "Mağaza, projeler, öneriler, ayarlar, kullanıcı verileri ve Pro bilgileri yedek kanalına yazıldı. ☁️") if ok else WN("YEDEK KISMEN ALINDI", "Bazı yedekler yazılamadı. Konsol çıktısını ve kanal izinlerini kontrol et."))
+    elif i == "yükle":
+        h = (hedef or "hepsi").lower(); msg = []
+        if h in ("emoji", "hepsi"):
+            d = await pull_backup(bot, "emoji")
+            if d: msg.append("emoji: " + str(emoji_restore(d)))
+        if h in ("pro", "hepsi"):
+            d = await pull_backup(bot, "pro")
+            if d: msg.append("pro: " + str(pro_restore(d)))
+        if h in ("settings", "ayarlar", "hepsi"):
+            d = await pull_backup(bot, "settings")
+            if d: msg.append("ayar+half: " + str(settings_restore(d)))
+        if h in ("veri", "data", "hepsi"):
+            d = await pull_file_backup(bot, "kdata")
+            if d: msg.append("veri: " + str(restore_tables(d, DATA_TABLES, force=True)))
+        if h in ("kullanıcı", "kullanici", "user", "hepsi"):
+            d = await pull_file_backup(bot, "kuser")
+            if d: msg.append("kullanıcı: " + str(restore_tables(d, USER_TABLES, force=True)))
+        refresh_emojis()
+        await rp(ctx, OK("YEDEK YÜKLENDİ", ", ".join(msg) + "\nTüm butonların yeniden bağlanması için `k!restart` yaz.") if msg else WN("YEDEK BULUNAMADI", "Yüklenecek uygun bir yedek bulunamadı."))
+    else:
+        await rp(ctx, head("log", "YEDEK DURUMU") + "\n\n" + KV([
+            (e("dot") + "Emoji", len(EMO_CACHE)), (e("dot") + "Pro üye", len(db.all("SELECT 1 FROM users WHERE pro=1"))),
+            (e("dot") + "Ürün", len(db.all("SELECT 1 FROM shop_products"))), (e("dot") + "Proje", len(db.all("SELECT 1 FROM projects"))),
+            (e("dot") + "Kupon", len(db.all("SELECT 1 FROM shop_coupons"))),
+            (e("alarm") + "Son veri yedeği", ("<t:" + str(int(_LAST["data"])) + ":R>") if _LAST["data"] else "Bu oturumda değişiklik olmadı"),
+        ]) + tip("Veri değiştikçe 30 saniye içinde otomatik yedeklenir • `k!kalıcılık` ile rapor al"))
+
+@kategori("owner")
+@bot.command(name="kalıcılık", aliases=["kalicilik", "persist"], help="Veri kalıcılığı raporu / `test` ile anında yedek (yalnızca bot sahibi)")
+@is_owner()
+async def kalicilik(ctx, islem: str = None):
+    def n(t):
+        try: return db.one("SELECT COUNT(*) AS c FROM " + t)["c"]
+        except Exception: return 0
+    if islem and islem.lower() in ("test", "kaydet"):
+        if not BACKUP_CH: return await rp(ctx, ER("YEDEK KANALI YOK", "`BACKUP_CHANNEL_ID` ayarlı değil."))
+        ok = await save_all_backups(bot, force=True)
+        return await rp(ctx, OK("YEDEK TESTİ BAŞARILI", "Veri yedek kanalına yazıldı ve eski yedek temizlendi. ☁️") if ok else ER("YEDEK TESTİ BAŞARISIZ", "Yedek kanalına yazılamadı. Botun **Mesaj Gönder / Dosya Ekle / Mesaj Geçmişi / Mesajları Yönet** izinlerini kontrol et."))
+    path = os.path.abspath(DB_PATH)
+    try: size = str(round(os.path.getsize(DB_PATH) / 1024, 1)) + " KB"
+    except Exception: size = "—"
+    warns = []
+    if not BACKUP_CH: warns.append("`BACKUP_CHANNEL_ID` yok → disk sıfırlanırsa veri kaybolur.")
+    if not path.startswith(("/data", "/mnt", "/var/data", "/app/data")): warns.append("Veritabanı kalıcı bir diskte görünmüyor (`" + path + "`). Hosting'inde volume varsa `DB_PATH` ayarla.")
+    await rp(ctx, head("shield", "KALICILIK RAPORU") + "\n\n" + KV([
+        (e("dot") + "Veritabanı", path[-60:]), (e("dot") + "Boyut", size),
+        (e("dot") + "Bulut yedeği", "AÇIK ✅" if BACKUP_CH else "KAPALI ❌"),
+        (e("alarm") + "Son veri yedeği", ("<t:" + str(int(_LAST["data"])) + ":R>") if _LAST["data"] else "Bu oturumda değişiklik yok"),
+        (e("gift") + "Ürün", n("shop_products")), (e("ticket") + "Kupon", n("shop_coupons")), (e("clip") + "Sipariş", n("shop_orders")),
+        (e("gear") + "Mağaza ayarı", n("shop_settings")), (e("diamond") + "Proje", n("projects")), (e("pen") + "Proje içeriği", n("project_assets")),
+        (e("spark") + "Öneri", n("suggestions")),
+    ]) + (("\n\n" + "\n".join(e("warn") + " " + w for w in warns)) if warns else "\n\n" + e("check") + " Her şey yolunda; veriler yeniden başlatmada korunur.") + tip("Anında yedek: `k!kalıcılık test`"))
+
+# ═══════════════════════════════════════════════════════════════════
+# 🎨 GÜZELLEŞTİRME — tüm cevap kartlarını etkileyen çekirdek fonksiyonlar
+# ═══════════════════════════════════════════════════════════════════
+def bar(p, ln=14):
+    p = max(0, min(100, int(p))); f = round(p / 100 * ln)
+    return "`" + "▰" * f + "▱" * (ln - f) + "` **%" + str(p) + "**"
+
+def _foot(kind, who=None):
+    base = {"ok": e("check") + " Başarılı", "er": e("cross") + " Başarısız", "wn": e("warn") + " Dikkat"}.get(kind, e("logo") + " Katre")
+    parts = [base]
+    if who: parts.append("👤 " + str(who)[:32])
+    parts.append("v" + BOT_VERSION)
+    return "-# " + " • ".join(parts)
+
+def _make_con(text, accent=None, footer=True, rows=(), who=None):
+    title, rest = _card_parts(text); kind = _kind(title)
+    con = _new_con(accent if accent is not None else _accent(title))
+    if "**" in title and not title.lstrip().startswith("#"):
+        con.add_item(TextDisplay(("## " + title.replace("**", "").strip())[:300]))
+        if rest:
+            _sep(con); con.add_item(TextDisplay(rest[:3400]))
+    else:
+        con.add_item(TextDisplay((title + (("\n" + rest) if rest else ""))[:3800]))
+    for r in rows: con.add_item(r)
+    if footer:
+        _sep(con, False); con.add_item(TextDisplay(_foot(kind, who)))
+    return con
+
+def _make_lv(text, who=None):
+    try: lv = LayoutView(timeout=None)
+    except TypeError: lv = LayoutView()
+    lv.add_item(_make_con(text, who=who)); return lv
+
+async def v2_text(sendable, text, eph=False):
+    who = None
+    au = getattr(sendable, "author", None)
+    if au is not None and not getattr(au, "bot", False): who = getattr(au, "display_name", None)
+    if HAS_V2:
+        try:
+            if eph: return await sendable.send(view=_make_lv(text, who), ephemeral=True)
+            return await sendable.send(view=_make_lv(text, who))
+        except Exception: pass
+    try:
+        if eph: return await sendable.send(text, ephemeral=True)
+        return await sendable.send(text)
+    except Exception: return None
+
+# ── Mağaza vitrini: özet satırı, düşük stok uyarısı, kupon ipucu ──
+def prod_line(p):
+    if p["stock"] < 0: stock = "∞"
+    elif p["stock"] == 0: stock = "❌ Tükendi"
+    elif p["stock"] <= 3: stock = "⚠️ Son " + str(p["stock"])
+    else: stock = str(p["stock"])
+    return (p["emoji"] or "🛍️") + " " + ("⭐ " if p["featured"] else "") + "**" + p["name"] + "** · `#" + str(p["id"]) + "` · `" + fmt_price(p["price"], p["currency"]) + "` · stok `" + stock + "`"
+
+def shop_front(guild):
+    s = sget(guild.id) if guild else {"title": "Mağaza", "description": "", "banner": "", "color": 5793266}
+    prods = db.all("SELECT * FROM shop_products WHERE guild_id=? AND active=1 ORDER BY featured DESC, category, id", (guild.id,)) if guild else []
+    cats = {}
+    for p in prods: cats.setdefault(p["category"], []).append(p)
+    lines = []
+    for c, items in cats.items():
+        lines.append("### 📁 " + c)
+        lines += [prod_line(p) for p in items[:10]]
+        if len(items) > 10: lines.append("-# … +" + str(len(items) - 10) + " ürün daha (kategori menüsünden gör)")
+    sold = sum(int(p["sold"] or 0) for p in prods)
+    stats = "-# 📦 **" + str(len(prods)) + "** ürün • 📁 **" + str(len(cats)) + "** kategori • 🏆 **" + str(sold) + "** teslimat • 🎟️ Kuponun varsa sipariş formuna yaz"
+    body = (s["description"] or "Bir ürün seç, ödeme yöntemini belirle; siparişin anında yetkililere ulaşsın.") + "\n\n" + stats + "\n\n" + ("\n".join(lines) if lines else "_Henüz ürün eklenmemiş._")
+    dummy = discord.SelectOption(label="—", value="0")
+    opts = [discord.SelectOption(label=p["name"][:100], value=str(p["id"]), description=(fmt_price(p["price"], p["currency"]) + " • " + (p["description"] or ""))[:100], emoji=semoji(p["emoji"])) for p in prods[:25]] or [dummy]
+    copts = [discord.SelectOption(label=c[:100], value=c[:100], description=str(len(v)) + " ürün") for c, v in list(cats.items())[:25]] or [dummy]
+    pick_sel = Select(placeholder="🛍️ Ürün seç…", options=opts, custom_id="kshop:pick")
+    cat_sel = Select(placeholder="📁 Kategoriye göz at…", options=copts, custom_id="kshop:cat")
+    async def pick_cb(it): await show_product(it, int(pick_sel.values[0]))
+    async def cat_cb(it):
+        ps = db.all("SELECT * FROM shop_products WHERE guild_id=? AND active=1 AND category=? ORDER BY featured DESC, id LIMIT 25", (it.guild.id, cat_sel.values[0]))
+        if not ps: return await esend(it, note("wn", "KATEGORİ BOŞ", "Bu kategoride ürün yok."))
+        sel = Select(placeholder="Ürün seç…", options=[discord.SelectOption(label=p["name"][:100], value=str(p["id"]), description=fmt_price(p["price"], p["currency"]), emoji=semoji(p["emoji"])) for p in ps])
+        async def scb(i2): await show_product(i2, int(sel.values[0]))
+        sel.callback = scb
+        await esend(it, v2card("📁 " + cat_sel.values[0], "\n".join(prod_line(p) for p in ps)[:3000], (_row(sel),), timeout=300))
+    pick_sel.callback = pick_cb; cat_sel.callback = cat_cb
+    async def mine(it): await esend(it, my_orders_view(it.guild.id, it.user.id))
+    rows = (_row(pick_sel), _row(cat_sel), _row(mkbtn("Siparişlerim", mine, discord.ButtonStyle.secondary, "📦", "kshop:mine")))
+    return v2card("🛍️ " + (s["title"] or "Mağaza"), body, rows, color=s["color"] or 0x5865F2, thumb=(s["banner"] or None), footer="Satın alma güvenli • siparişler yetkililer tarafından onaylanır")
+
 
 if __name__ == "__main__":
     bot.run(BOT_TOKEN)
