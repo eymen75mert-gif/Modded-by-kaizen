@@ -5385,6 +5385,127 @@ def shop_front(guild):
     rows = (_row(pick_sel), _row(cat_sel), _row(mkbtn("Siparişlerim", mine, discord.ButtonStyle.secondary, "📦", "kshop:mine")))
     return v2card("🛍️ " + (s["title"] or "Mağaza"), body, rows, color=s["color"] or 0x5865F2, thumb=(s["banner"] or None), footer="Satın alma güvenli • siparişler yetkililer tarafından onaylanır")
 
+# ═══════════════════════════════════════════════════════════════════
+# 🔧 v7.1.1 — MAĞAZA HATA DÜZELTMESİ (çok satırlı yapıştırma + bozuk veri onarımı)
+# Sorun: Birden çok `k!mağaza düzenle ...` satırı tek mesajda gönderilince
+# son argüman (emoji/ad/görsel) TÜM satırları yutuyor ve ürüne yazılıyordu.
+# ═══════════════════════════════════════════════════════════════════
+BOT_VERSION = "7.1.1"
+CHANGELOG["7.1.1"] = [
+    "🔧 Mağaza: çok satırlı yapıştırılan komutların ürün emoji/ad/görsel alanını bozması düzeltildi; alanlar artık tek satıra ve geçerli değere zorlanıyor.",
+    "🩹 Bozuk kayıtlar açılışta otomatik onarılır; yutulan `düzenle` satırları geri uygulanır. Elle onarım: `k!mağaza onar`.",
+]
+VERSION_TAGLINE["7.1.1"] = "Mağaza onarımı • güvenli alan doğrulama"
+
+_CMD_RE = re.compile(r"(?im)^\s*k!\s*ma[ğg]aza\s+d[üu]zenle\s+(\d+)\s+(\S+)\s+(.+?)\s*$")
+
+def clean1(s, n=80):
+    t = str(s or "").strip()
+    return (t.splitlines()[0].strip() if t else "")[:n]
+def clean_name(s, n=80): return re.sub(r"[*_`~|]", "", clean1(s, n)).strip()
+def clean_emoji(x):
+    parts = clean1(x, 80).split()
+    return (semoji(parts[0]) if parts else None) or "🛍️"
+def clean_url(x):
+    parts = clean1(x, 400).split()
+    return parts[0][:300] if parts and re.match(r"^https?://\S+$", parts[0]) else ""
+
+def prod_line(p):
+    if p["stock"] < 0: stock = "∞"
+    elif p["stock"] == 0: stock = "❌ Tükendi"
+    elif p["stock"] <= 3: stock = "⚠️ Son " + str(p["stock"])
+    else: stock = str(p["stock"])
+    return clean_emoji(p["emoji"]) + " " + ("⭐ " if p["featured"] else "") + "**" + (clean_name(p["name"]) or "Ürün") + "** · `#" + str(p["id"]) + "` · `" + fmt_price(p["price"], clean_name(p["currency"], 12)) + "` · stok `" + stock + "`"
+
+def repair_shop_data():
+    """Bozuk ürün/ayar kayıtlarını temizler ve yutulmuş `düzenle` satırlarını geri uygular. Düzeltilen alan sayısını döndürür."""
+    fixed = 0; replays = []
+    for p in db.all("SELECT * FROM shop_products"):
+        for k in ("name", "emoji", "category", "currency", "image", "description"):
+            for m in _CMD_RE.finditer(str(p.get(k) or "")): replays.append((int(m.group(1)), m.group(2).lower(), m.group(3)))
+    for p in db.all("SELECT * FROM shop_products"):
+        new = {"name": clean_name(p["name"]) or "Ürün", "emoji": clean_emoji(p["emoji"]), "category": clean_name(p["category"], 30) or "Genel",
+               "currency": clean_name(p["currency"], 12) or "coin", "image": clean_url(p["image"]),
+               "description": "\n".join(l for l in str(p["description"] or "").splitlines() if not _CMD_RE.match(l)).strip()[:800]}
+        ch = {k: v for k, v in new.items() if v != (p.get(k) if p.get(k) is not None else "")}
+        if ch:
+            db.q("UPDATE shop_products SET " + ", ".join(k + "=?" for k in ch) + " WHERE id=?", tuple(ch.values()) + (p["id"],)); fixed += len(ch)
+    for pid, alan, val in replays:
+        col = PROD_FIELDS.get(alan); p = db.one("SELECT * FROM shop_products WHERE id=?", (pid,))
+        if not p: continue
+        if col == "emoji" and p["emoji"] in ("🛍️", "", None) and semoji(clean1(val).split()[0] if clean1(val) else ""):
+            db.q("UPDATE shop_products SET emoji=? WHERE id=?", (clean_emoji(val), pid)); fixed += 1
+        elif col == "image" and not p["image"] and clean_url(val):
+            db.q("UPDATE shop_products SET image=? WHERE id=?", (clean_url(val), pid)); fixed += 1
+    for s in db.all("SELECT * FROM shop_settings"):
+        t = clean1(s["title"], 80) or "Katre Mağaza"; b = clean_url(s["banner"]); d = "\n".join(l for l in str(s["description"] or "").splitlines() if not _CMD_RE.match(l)).strip()
+        if t != s["title"] or b != (s["banner"] or "") or d != (s["description"] or ""):
+            db.q("UPDATE shop_settings SET title=?, banner=?, description=? WHERE guild_id=?", (t, b, d, s["guild_id"])); fixed += 1
+    return fixed
+
+for _n in ("ekle", "düzenle", "onar"):
+    try: magaza.remove_command(_n)
+    except Exception: pass
+
+@magaza.command(name="ekle", help="<Ad | Fiyat | Para | Stok | Kategori | Açıklama>")
+@commands.has_permissions(administrator=True)
+async def m_ekle(ctx, *, raw: str):
+    pr = [x.strip() for x in raw.split("|")]
+    try:
+        name = clean_name(pr[0]); price = float(clean1(pr[1]).replace(",", "."))
+        cur = clean_name(pr[2], 12) if len(pr) > 2 and pr[2] else "coin"
+        stock = int(clean1(pr[3])) if len(pr) > 3 and pr[3] else -1
+        cat = (clean_name(pr[4], 30) if len(pr) > 4 and pr[4] else "") or "Genel"; desc = pr[5][:800] if len(pr) > 5 else ""
+        if not name or price < 0: raise ValueError
+    except (ValueError, IndexError):
+        return await ctx.send(view=note("er", "FORMAT HATALI", "`k!mağaza ekle Ticket Botu | 400 | Robux | -1 | Botlar | Talep sistemi`\nStok `-1` = sınırsız. **Her komutu ayrı mesajda gönder.**"))
+    c = db.q("INSERT INTO shop_products(guild_id,name,price,currency,description,stock,category,created_at) VALUES(?,?,?,?,?,?,?,?)", (ctx.guild.id, name, price, cur or "coin", desc, stock, cat, _now()))
+    await refresh_panel(ctx.guild)
+    await ctx.send(view=note("ok", "ÜRÜN EKLENDİ #" + str(c.lastrowid), "**" + name + "** • `" + fmt_price(price, cur) + "` • stok `" + ("∞" if stock < 0 else str(stock)) + "`\nDüzenle: `k!mağaza düzenle " + str(c.lastrowid) + " <alan> <değer>`"))
+
+@magaza.command(name="düzenle", aliases=["duzenle"], help="<id> <ad|fiyat|para|stok|kategori|açıklama|emoji|rol|görsel|öne|aktif> <değer>")
+@commands.has_permissions(administrator=True)
+async def m_duzenle(ctx, pid: int, alan: str, *, deger: str):
+    col = PROD_FIELDS.get(alan.lower())
+    if not db.one("SELECT 1 FROM shop_products WHERE id=? AND guild_id=?", (pid, ctx.guild.id)): return await ctx.send(view=note("er", "ÜRÜN YOK", "Bu ID ile ürün bulunamadı."))
+    if not col: return await ctx.send(view=note("er", "GEÇERSİZ ALAN", "Alanlar: " + ", ".join("`" + k + "`" for k in ("ad", "fiyat", "para", "stok", "kategori", "açıklama", "emoji", "rol", "görsel", "öne", "aktif"))))
+    raw = deger.strip(); first = clean1(raw, 400)
+    try:
+        if col == "price": v = float(first.replace(",", "."))
+        elif col in ("stock", "featured", "active"): v = int(first)
+        elif col == "role_id": v = 0 if first in ("0", "-", "yok") else (await commands.RoleConverter().convert(ctx, first)).id
+        elif col == "emoji":
+            tok = first.split()[0] if first.split() else ""
+            if not semoji(tok): raise ValueError
+            v = tok
+        elif col == "name": v = clean_name(raw); assert v
+        elif col in ("currency", "category"): v = clean_name(raw, 30 if col == "category" else 12); assert v
+        elif col == "image": v = "" if first == "-" else clean_url(first); assert v or first == "-"
+        else: v = raw[:800]
+    except (ValueError, AssertionError, commands.BadArgument):
+        return await ctx.send(view=note("er", "GEÇERSİZ DEĞER", "Bu alan için geçerli bir değer gir.\n`emoji` → tek bir emoji • `görsel` → https:// bağlantısı • `fiyat/stok` → sayı"))
+    db.q("UPDATE shop_products SET " + col + "=? WHERE id=?", (v, pid)); await refresh_panel(ctx.guild)
+    extra = "\nℹ️ Mesajda birden fazla satır vardı; yalnızca **ilk satır** işlendi. Diğer komutları **ayrı mesajlar** olarak gönder." if ("\n" in raw and col != "description") else ""
+    await ctx.send(view=note("ok", "ÜRÜN GÜNCELLENDİ", "`#" + str(pid) + "` → **" + alan + "** güncellendi." + extra))
+
+@magaza.command(name="onar", aliases=["repair"], help="Bozuk ürün/ayar kayıtlarını onarır ve vitrini yeniler")
+@commands.has_permissions(administrator=True)
+async def m_onar(ctx):
+    n = repair_shop_data(); await refresh_panel(ctx.guild)
+    await ctx.send(view=note("ok" if n else "in", "MAĞAZA ONARILDI" if n else "SORUN BULUNAMADI", ("**" + str(n) + "** alan düzeltildi, vitrin yenilendi.") if n else "Tüm kayıtlar temiz görünüyor."))
+
+_REPAIR_DONE = {"v": False}
+async def _repair_on_ready():
+    if _REPAIR_DONE["v"]: return
+    _REPAIR_DONE["v"] = True
+    try:
+        n = repair_shop_data()
+        if n: print("🩹 Mağaza onarıldı: " + str(n) + " alan")
+        for g in bot.guilds:
+            s = db.one("SELECT panel_message FROM shop_settings WHERE guild_id=?", (g.id,))
+            if s and s["panel_message"]: await refresh_panel(g)
+    except Exception: traceback.print_exc()
+bot.add_listener(_repair_on_ready, "on_ready")
 
 if __name__ == "__main__":
     bot.run(BOT_TOKEN)
